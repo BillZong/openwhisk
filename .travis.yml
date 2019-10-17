@@ -21,7 +21,7 @@ dist: xenial
 jdk: openjdk8
 language: scala
 scala:
-   - 2.12.7
+   - 2.13.0
 
 services:
   - docker
@@ -67,22 +67,22 @@ install:
 
 jobs:
   include:
-    - script:
-        - ./tools/travis/runUnitTests.sh
-        - ./tools/travis/checkAndUploadLogs.sh unit db
-      name: "Unit Tests"
-    - script:
-       - ./tools/travis/runSystemTests.sh
-       - ./tools/travis/checkAndUploadLogs.sh system
-      name: "System Tests"
-    - script:
-      - ./tools/travis/runMultiRuntimeTests.sh
-      - ./tools/travis/checkAndUploadLogs.sh multi-runtime
-      name: "Multi-Runtime Tests"
-    - script:
-        - ./tools/travis/runStandaloneTests.sh
-        - ./tools/travis/checkAndUploadLogs.sh standalone
-      name: "Standalone Tests"
+#    - script:
+#        - ./tools/travis/runUnitTests.sh
+#        - ./tools/travis/checkAndUploadLogs.sh unit db
+#      name: "Unit Tests"
+#    - script:
+#       - ./tools/travis/runSystemTests.sh
+#       - ./tools/travis/checkAndUploadLogs.sh system
+#      name: "System Tests"
+#    - script:
+#      - ./tools/travis/runMultiRuntimeTests.sh
+#      - ./tools/travis/checkAndUploadLogs.sh multi-runtime
+#      name: "Multi-Runtime Tests"
+#    - script:
+#        - ./tools/travis/runStandaloneTests.sh
+#        - ./tools/travis/checkAndUploadLogs.sh standalone
+#      name: "Standalone Tests"
     - script:
         - ./tests/performance/preparation/deploy.sh
         - TERM=dumb ./tests/performance/wrk_tests/latency.sh "https://172.17.0.1:10001" "$(cat ansible/files/auth.guest)" ./tests/performance/preparation/actions/noop.js 2m
