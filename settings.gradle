@@ -22,6 +22,7 @@ include 'core:invoker'
 include 'core:cosmosdb:cache-invalidator'
 include 'core:standalone'
 include 'core:monitoring:user-events'
+include 'core:scheduler'
 
 include 'tests'
 include 'tests:performance:gatling_tests'
