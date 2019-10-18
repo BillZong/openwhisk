@@ -48,3 +48,21 @@ env_hosts_dir: "{{ playbook_dir }}/environments/local"
 container_pool_akka_client: true
 runtimes_enable_concurrency: true
 limit_action_concurrency_max: 500
+
+couchdb:
+  pull_couchdb: false
+kafka:
+  pull_kafka: false
+zookeeper:
+  pull_zookeeper: false
+redis:
+  pull_redis: false
+
+apigateway_local_build: true
+apigateway:
+  docker_image: "openwhisk/apigateway:latest"
+
+skip_pull_runtimes: true
+manifest_file: "/runtimes.json"
+
+# cli_installation_mode: "local"
