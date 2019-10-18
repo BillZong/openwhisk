@@ -1,0 +1,83 @@
+{
+    "runtimes": {
+        "nodejs": [
+            {
+                "kind": "nodejs:10",
+                "default": true,
+                "image": {
+                    "prefix": "openwhisk",
+                    "name": "action-nodejs-v10",
+                    "tag": "local-v0.1"
+                },
+                "deprecated": false,
+                "attached": {
+                    "attachmentName": "codefile",
+                    "attachmentType": "text/plain"
+                },
+                "stemCells": [
+                    {
+                        "count": 2,
+                        "memory": "256 MB"
+                    }
+                ]
+            }
+        ],
+        "python": [
+            {
+                "kind": "python:3",
+                "default": true,
+                "image": {
+                    "prefix": "openwhisk",
+                    "name": "python3action",
+                    "tag": "local-v0.1"
+                },
+                "deprecated": false,
+                "attached": {
+                    "attachmentName": "codefile",
+                    "attachmentType": "text/plain"
+                }
+            }
+        ],
+        "swift": [
+            {
+                "kind": "swift:4.2",
+                "default": true,
+                "image": {
+                    "prefix": "openwhisk",
+                    "name": "action-swift-v4.2",
+                    "tag": "local-v0.1"
+                },
+                "deprecated": false,
+                "attached": {
+                    "attachmentName": "codefile",
+                    "attachmentType": "text/plain"
+                }
+            }
+        ],
+        "java": [
+            {
+                "kind": "java:8",
+                "default": true,
+                "image": {
+                    "prefix": "openwhisk",
+                    "name": "java8action",
+                    "tag": "local-v0.1"
+                },
+                "deprecated": false,
+                "attached": {
+                    "attachmentName": "codefile",
+                    "attachmentType": "text/plain"
+                },
+                "requireMain": true
+            }
+        ]
+    },
+    "blackboxes": [
+        {
+            "prefix": "openwhisk",
+            "name": "dockerskeleton",
+            "tag": "nightly"
+        }
+    ]
+}
+
