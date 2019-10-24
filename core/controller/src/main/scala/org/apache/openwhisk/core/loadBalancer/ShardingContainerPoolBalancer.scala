@@ -253,6 +253,8 @@ class ShardingContainerPoolBalancer(
   override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = Future.successful(schedulingState.invokers)
   override def clusterSize: Int = schedulingState.clusterSize
 
+  implicit val whiskConfig = config
+
   /** 1. Publish a message to the loadbalancer */
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
     implicit transid: TransactionId): Future[Future[Either[ActivationId, WhiskActivation]]] = {
@@ -396,18 +398,26 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
    * @return an invoker to schedule to or None of no invoker is available
    */
   @tailrec
-  def schedule(
-    maxConcurrent: Int,
-    fqn: FullyQualifiedEntityName,
-    invokers: IndexedSeq[InvokerHealth],
-    dispatched: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]],
-    slots: Int,
-    index: Int,
-    step: Int,
-    stepsDone: Int = 0)(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
+  def schedule(maxConcurrent: Int,
+               fqn: FullyQualifiedEntityName,
+               invokers: IndexedSeq[InvokerHealth],
+               dispatched: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]],
+               slots: Int,
+               index: Int,
+               step: Int,
+               stepsDone: Int = 0)(implicit logging: Logging,
+                                   transId: TransactionId,
+                                   actorSystem: ActorSystem,
+                                   messagingProvider: MessagingProvider,
+                                   whiskConfig: WhiskConfig): Option[(InvokerInstanceId, Boolean)] = {
     val numInvokers = invokers.size
 
     if (numInvokers > 0) {
+      // TODO: need to delete this test
+      val dilemma = Metric("slotsNotEnough", slots.toLong)
+      messagingProvider.getProducer(whiskConfig).send("resource", dilemma)
+      logging.info(this, s"send some resource scheduler test dilemma: ${dilemma}")
+
       val invoker = invokers(index)
       //test this invoker - if this action supports concurrency, use the scheduleConcurrent function
       if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquireConcurrent(fqn, maxConcurrent, slots)) {
@@ -415,12 +425,17 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
       } else {
         // If we've gone through all invokers
         if (stepsDone == numInvokers + 1) {
+          // report the dilemma.
+          val dilemma = Metric("slotsNotEnough", slots.toLong)
+          messagingProvider.getProducer(whiskConfig).send("resource", dilemma)
+
           val healthyInvokers = invokers.filter(_.status.isUsable)
           if (healthyInvokers.nonEmpty) {
             // Choose a healthy invoker randomly
             val random = healthyInvokers(ThreadLocalRandom.current().nextInt(healthyInvokers.size)).id
             dispatched(random.toInt).forceAcquireConcurrent(fqn, maxConcurrent, slots)
             logging.warn(this, s"system is overloaded. Chose invoker${random.toInt} by random assignment.")
+            // TODO: send resource limited message
             Some(random, true)
           } else {
             None
