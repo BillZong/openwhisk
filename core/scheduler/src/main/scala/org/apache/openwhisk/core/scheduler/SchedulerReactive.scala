@@ -32,6 +32,8 @@ import scala.collection.mutable.Map
 import scala.concurrent.duration._
 import scala.concurrent.{ExecutionContext, Future}
 
+import sys.process._
+
 object SchedulerReactive extends SchedulerProvider {
 
   override def instance(config: WhiskConfig, instance: SchedulerInstanceId, producer: MessageProducer)(
@@ -56,6 +58,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
 
   // initialize msg consumer
   val msgProvider = SpiLoader.get[MessagingProvider]
+  logging.info(this, s"create instance, id: ${instance.asString}")
   val testConsumer = msgProvider.getConsumer(config, s"scheduler${instance.asString}", "resource", 1024)
   val pingPollDuration = 1.second
   val resourceFeed: ActorRef = actorSystem.actorOf(Props {
@@ -69,20 +72,37 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
       logHandoff = false)
   })
 
+  // when handling, could not handle more info again.
+  private var resourceHandling: Boolean = false // TODO: sync context problem
+
   /** Is called when an resource report is read from Kafka */
   def processResourceMessage(bytes: Array[Byte]): Future[Unit] = {
     val raw = new String(bytes, StandardCharsets.UTF_8)
     Future(Metric.parse(raw))
       .flatMap(Future.fromTry)
       .flatMap { msg =>
+        logging.info(this, s"scheduler${instance.asString} got resource msg: ${msg}")
+
         msg.metricName match {
           case "memoryTotal" =>
             resourcePool("memoryTotal") = msg.metricValue // MB
+          case "slotsNotEnough" =>
+            if (!resourceHandling) {
+              resourceHandling = true
+              val proc = Process("/bin/linux/arm64/ali-ecs-buyer -c /ecs-configs.yaml")
+              val ret = proc.run()
+              if (ret.exitValue == 0) {
+                logging.info(this, s"buying ecs success, 5 nodes added")
+              } else {
+                logging.info(this, s"buying ecs failed: ${ret.exitValue}")
+              }
+              resourceHandling = false
+            } else {
+              logging.info(this, s"handling resource scaling now, could not handle more of it.")
+            }
         }
 
         resourceFeed ! MessageFeed.Processed
-
-        logging.info(this, s"scheduler${instance.asString} got resource msg: ${msg}")
         Future.successful(())
       }
       .recoverWith {

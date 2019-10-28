@@ -98,7 +98,7 @@ object Scheduler {
     }
 
     require(args.length >= 1, "scheduler instance required")
-    logger.info(this, s"current args: ${args}")
+    logger.info(this, s"current args: ${args(0)}")
     val schedulerInstance = SchedulerInstanceId(args(0))
     initKamon(schedulerInstance)
     logger.info(this, s"starting scheduler, the kafka host is: ${config.kafkaHosts}")
@@ -125,6 +125,7 @@ object Scheduler {
     val httpsConfig =
       if (Scheduler.protocol == "https") Some(loadConfigOrThrow[HttpsConfig]("whisk.scheduler.https")) else None
 
+    logger.info(this, s"starting http server, listening port: ${port}")
     val schedulerServer = SpiLoader.get[SchedulerServerProvider].instance(scheduler)
     BasicHttpService.startHttpService(schedulerServer.route, port, httpsConfig)(
       actorSystem,
