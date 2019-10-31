@@ -51,7 +51,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   implicit val ec: ExecutionContext = actorSystem.dispatcher
   val minNodesCfg = InvokerNodeLimit.config.min
   val maxNodesCfg = InvokerNodeLimit.config.max
-  var currentNodesCount = 0
+  var currentNodesCount = 0 // TODO: race condition problem
 
   private val logsProvider = SpiLoader.get[LogStoreProvider].instance(actorSystem)
   logging.info(this, s"LogStoreProvider: ${logsProvider.getClass}")
@@ -75,7 +75,8 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   })
 
   // when handling, could not handle more info again.
-  private var resourceHandling: Boolean = false // TODO: sync context problem
+  private var buying: Boolean = false // TODO: race condition problem
+  private var deleting: Boolean = false // TODO: race condition problem
 
   /** Is called when an resource report is read from Kafka */
   def processResourceMessage(bytes: Array[Byte]): Future[Unit] = {
@@ -91,11 +92,12 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             resourceFeed ! MessageFeed.Processed
           case "OnlineInvokerCount" =>
             currentNodesCount = msg.metricValue.toInt // 在线的Invoker数量
+            resourceFeed ! MessageFeed.Processed // block the queue
           case "slotsNotEnough" =>
-            resourceFeed ! MessageFeed.Processed // don't block the queue
+//            resourceFeed ! MessageFeed.Processed // don't block the queue
             // TODO: 3 times check
-            if (!resourceHandling) {
-              resourceHandling = true
+            if (!buying) {
+              buying = true
               var buyCount = 5
               if (buyCount + currentNodesCount > maxNodesCfg) {
                 buyCount = maxNodesCfg - currentNodesCount
@@ -107,10 +109,32 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
               } else {
                 logging.info(this, s"buying ${buyCount} nodes ecs failed: ${ret.exitValue}")
               }
-              resourceHandling = false
+              buying = false
             } else {
-              logging.info(this, s"handling resource scaling now, could not handle more of it.")
+              logging.info(this, s"buying nodes now, could not handle more of it.")
             }
+            resourceFeed ! MessageFeed.Processed // block the queue
+          case "slotsTooMuch" =>
+            // TODO: 3 times check
+            if (!deleting) {
+              deleting = true
+              var deleteCount = 5
+              if (currentNodesCount - deleteCount > minNodesCfg) {
+                deleteCount = currentNodesCount - minNodesCfg
+              }
+              val proc =
+                Process(s"/bin/linux/arm64/ali-ecs-deleter -c /ecs-delete-configs.yaml --node-count ${deleteCount}")
+              val ret = proc.run()
+              if (ret.exitValue == 0) {
+                logging.info(this, s"delete ecs success, ${deleteCount} nodes deleted")
+              } else {
+                logging.info(this, s"deleting ${deleteCount} nodes ecs failed: ${ret.exitValue}")
+              }
+              deleting = false
+            } else {
+              logging.info(this, s"deleting nodes now, could not handle more of it.")
+            }
+            resourceFeed ! MessageFeed.Processed // block the queue
         }
 
         Future.successful(())

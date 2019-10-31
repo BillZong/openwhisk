@@ -294,4 +294,14 @@ class InvokerReactive(
       case Failure(t) => logging.error(this, s"failed to ping the controller: $t")
     }
   })
+
+  private var resourceTooMuchCount = 0
+  Scheduler.scheduleWaitAtMost(10.seconds)(() => {
+    // TODO: 3 times check && node count determination
+    val msg = Metric("slotsTooMuch", 2) // remove 2 nodes
+    val resTopic = "resource"
+    healthProducer.send(resTopic, msg).andThen {
+      case Failure(t) => logging.warn(this, s"failed to send topic ($resTopic): $t")
+    }
+  })
 }
