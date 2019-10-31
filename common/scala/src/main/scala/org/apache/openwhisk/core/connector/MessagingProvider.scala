@@ -18,14 +18,12 @@
 package org.apache.openwhisk.core.connector
 
 import akka.actor.ActorSystem
-
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.duration.FiniteDuration
 import org.apache.openwhisk.common.Logging
 import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.entity.ByteSize
 import org.apache.openwhisk.spi.Spi
 
+import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.util.Try
 
 /**

@@ -86,7 +86,7 @@ case class ActivationRequest(msg: ActivationMessage, invoker: InvokerInstanceId)
 case class InvocationFinishedMessage(invokerInstance: InvokerInstanceId, result: InvocationFinishedResult)
 
 // Sent to a scheduler for resource scheduling
-case class InvokerSupervisionMessage(totalActivations: LongAdder)
+case class InvokerSupervisionMessage(totalActivations: Long)
 
 // Sent to a monitor if the state changed
 case class CurrentInvokerPoolState(newState: IndexedSeq[InvokerHealth])
