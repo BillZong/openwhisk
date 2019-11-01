@@ -78,6 +78,8 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   private var buying: Boolean = false // TODO: race condition problem
   private var deleting: Boolean = false // TODO: race condition problem
 
+  private var avgResourcePercentage = 0L
+
   /** Is called when an resource report is read from Kafka */
   def processResourceMessage(bytes: Array[Byte]): Future[Unit] = {
     val raw = new String(bytes, StandardCharsets.UTF_8)
@@ -87,6 +89,9 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
         logging.info(this, s"scheduler${instance.asString} got resource msg: ${msg}")
 
         msg.metricName match {
+          case "memoryUsedPercentage" =>
+            avgResourcePercentage = msg.metricValue
+            resourceFeed ! MessageFeed.Processed
           case "memoryTotal" =>
             resourcePool("memoryTotal") = msg.metricValue // MB
             resourceFeed ! MessageFeed.Processed

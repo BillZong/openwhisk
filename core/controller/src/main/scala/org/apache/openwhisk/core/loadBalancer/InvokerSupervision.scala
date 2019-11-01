@@ -18,7 +18,6 @@
 package org.apache.openwhisk.core.loadBalancer
 
 import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.LongAdder
 
 import scala.collection.immutable
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -36,7 +35,6 @@ import akka.util.Timeout
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.connector._
-//import org.apache.openwhisk.core.containerpool.ContainerPoolConfig
 import org.apache.openwhisk.core.database.NoDocumentException
 import org.apache.openwhisk.core.entity.ActivationId.ActivationIdGenerator
 import org.apache.openwhisk.core.entity._
@@ -84,9 +82,6 @@ object InvocationFinishedResult {
 
 case class ActivationRequest(msg: ActivationMessage, invoker: InvokerInstanceId)
 case class InvocationFinishedMessage(invokerInstance: InvokerInstanceId, result: InvocationFinishedResult)
-
-// Sent to a scheduler for resource scheduling
-case class InvokerSupervisionMessage(totalActivations: Long)
 
 // Sent to a monitor if the state changed
 case class CurrentInvokerPoolState(newState: IndexedSeq[InvokerHealth])
@@ -173,21 +168,16 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
 
     // this is only used for the internal test action which enabled an invoker to become healthy again
     case msg: ActivationRequest => sendActivationToInvoker(msg.msg, msg.invoker).pipeTo(sender)
-
-    // this is only used for uploading invoker status for scheduler
-    case _: InvokerSupervisionMessage => publishInvokerCount()
   }
 
   def logStatus(): Unit = {
     monitor.foreach(_ ! CurrentInvokerPoolState(status))
-    // send invoker resource capacity to kafka for someone who's interested
-    publishResourceCapacity()
 
     val pretty = status.map(i => s"${i.id.toInt} -> ${i.status}")
     logging.info(this, s"invoker status changed to ${pretty.mkString(", ")}")
   }
 
-  private def publishInvokerCount(): Future[RecordMetadata] = {
+  private def publishInvokerCount() = {
     val topic = "resource"
 
     val start = transid.started(

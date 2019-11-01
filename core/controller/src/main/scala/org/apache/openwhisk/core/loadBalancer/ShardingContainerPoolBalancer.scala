@@ -42,7 +42,7 @@ import org.apache.openwhisk.spi.SpiLoader
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 
 /**
  * A loadbalancer that schedules workload based on a hashing-algorithm.
@@ -248,6 +248,15 @@ class ShardingContainerPoolBalancer(
         schedulingState.updateCluster(availableMembers.size)
     }
   }))
+
+  private val schedulerProducer = messagingProvider.getProducer(config)
+  private def updateInvokerMemoryUsage() = {
+    val totalInvokerMemory = schedulingState.totalSlotCount
+    val totalUsedMemory = totalBlackBoxActivationMemory.longValue + totalManagedActivationMemory.longValue
+    val msg = Metric("memoryUsedPercentage", totalUsedMemory * 100 / totalInvokerMemory)
+    schedulerProducer.send("resource", msg)
+  }
+  actorSystem.scheduler.schedule(10.seconds, 10.seconds)(updateInvokerMemoryUsage())
 
   /** Loadbalancer interface methods */
   override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = Future.successful(schedulingState.invokers)
@@ -486,6 +495,7 @@ case class ShardingContainerPoolBalancerState(
 
   /** Getters for the variables, setting from the outside is only allowed through the update methods below */
   def invokers: IndexedSeq[InvokerHealth] = _invokers
+  def totalSlotCount: Long = _invokers.foldLeft(0L)((total, invoker) => total + invoker.id.userMemory.toMB)
   def managedInvokers: IndexedSeq[InvokerHealth] = _managedInvokers
   def blackboxInvokers: IndexedSeq[InvokerHealth] = _blackboxInvokers
   def managedStepSizes: Seq[Int] = _managedStepSizes
