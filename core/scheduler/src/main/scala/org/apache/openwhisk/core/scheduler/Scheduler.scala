@@ -73,10 +73,6 @@ object Scheduler {
   def start(args: Array[String])(implicit ec: ExecutionContext, actorSystem: ActorSystem, logger: Logging): Unit = {
     Kamon.loadReportersFromConfig()
 
-    // TODO: needed?
-//    val poolConfig: ContainerPoolConfig = loadConfigOrThrow[ContainerPoolConfig](ConfigKeys.containerPool)
-//    val limitConfig: ConcurrencyLimitConfig = loadConfigOrThrow[ConcurrencyLimitConfig](ConfigKeys.concurrencyLimit)
-
     // Prepare Kamon shutdown
     CoordinatedShutdown(actorSystem).addTask(CoordinatedShutdown.PhaseActorSystemTerminate, "shutdownKamon") { () =>
       logger.info(this, s"Shutting down Kamon with coordinated shutdown")
@@ -113,7 +109,6 @@ object Scheduler {
           }
       }
 
-    //TODO: need implementation
     val producer = msgProvider.getProducer(config)
     val scheduler = try {
       SpiLoader.get[SchedulerProvider].instance(config, schedulerInstance, producer)
