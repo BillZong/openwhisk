@@ -19,6 +19,7 @@ package org.apache.openwhisk.core.scheduler
 
 import akka.Done
 import akka.actor.{ActorSystem, CoordinatedShutdown}
+import akka.http.scaladsl.server.Route
 import akka.stream.ActorMaterializer
 import com.typesafe.config.ConfigValueFactory
 import kamon.Kamon
@@ -26,15 +27,20 @@ import org.apache.openwhisk.common.Https.HttpsConfig
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.WhiskConfig._
-import org.apache.openwhisk.core.connector.{MessageProducer, MessagingProvider}
+import org.apache.openwhisk.core.connector.{MessageProducer, MessagingProvider, Metric}
 import org.apache.openwhisk.core.entity.SchedulerInstanceId
 import org.apache.openwhisk.http.{BasicHttpService, BasicRasService}
 import org.apache.openwhisk.spi.{Spi, SpiLoader}
 import org.apache.openwhisk.utils.ExecutionContextFactory
 import pureconfig.loadConfigOrThrow
 
+import java.nio.charset.StandardCharsets
+import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
+import spray.json._
+import DefaultJsonProtocol._
+
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.{Await, ExecutionContext, Future}
 
 object Scheduler {
 
@@ -138,7 +144,9 @@ trait SchedulerProvider extends Spi {
 }
 
 // this trait can be used to add common implementation
-trait SchedulerCore {}
+trait SchedulerCore {
+  def processResourceMessage(bytes: Array[Byte]): Future[Unit]
+}
 
 /**
  * An Spi for providing RestAPI implementation for scheduler.
@@ -149,9 +157,36 @@ trait SchedulerServerProvider extends Spi {
     scheduler: SchedulerCore)(implicit ec: ExecutionContext, actorSystem: ActorSystem, logger: Logging): BasicRasService
 }
 
+class SchedulerTestService(scheduler: SchedulerCore)(implicit val actorSystem: ActorSystem,
+                                                     implicit val logging: Logging)
+    extends BasicRasService {
+  override def routes(implicit transid: TransactionId): Route = {
+    super.routes ~ handleByHand
+  }
+
+  private val handleByHand = {
+    implicit val executionContext = actorSystem.dispatcher
+    (pathPrefix("test") & post) {
+      path("buy") {
+        complete {
+          scheduler
+            .processResourceMessage(Metric("slotsNotEnough", 256).serialize.getBytes(StandardCharsets.UTF_8))
+            .map(_ => JsObject("status" -> 0.toJson))
+        }
+      } ~ path("delete") {
+        complete {
+          scheduler
+            .processResourceMessage(Metric("slotsTooMuch", 10).serialize.getBytes(StandardCharsets.UTF_8))
+            .map(_ => JsObject("status" -> 0.toJson))
+        }
+      }
+    }
+  }
+}
+
 object DefaultSchedulerServer extends SchedulerServerProvider {
   override def instance(scheduler: SchedulerCore)(implicit ec: ExecutionContext,
                                                   actorSystem: ActorSystem,
                                                   logger: Logging): BasicRasService =
-    new BasicRasService {}
+    new SchedulerTestService(scheduler)
 }

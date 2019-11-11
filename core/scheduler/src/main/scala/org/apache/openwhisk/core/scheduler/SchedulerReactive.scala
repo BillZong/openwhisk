@@ -81,12 +81,14 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   private var avgResourcePercentage = 0L
 
   /** Is called when an resource report is read from Kafka */
-  def processResourceMessage(bytes: Array[Byte]): Future[Unit] = {
+  override def processResourceMessage(bytes: Array[Byte]): Future[Unit] = {
     val raw = new String(bytes, StandardCharsets.UTF_8)
     Future(Metric.parse(raw))
       .flatMap(Future.fromTry)
       .flatMap { msg =>
         logging.info(this, s"scheduler${instance.asString} got resource msg: ${msg}")
+
+        var retVal = 0
 
         msg.metricName match {
           case "memoryUsedPercentage" =>
@@ -103,16 +105,17 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             // TODO: 3 times check
             if (!buying) {
               buying = true
-              var buyCount = 5
+              var buyCount = 1
               if (buyCount + currentNodesCount > maxNodesCfg) {
                 buyCount = maxNodesCfg - currentNodesCount
               }
               val proc = Process(s"/root/ecs/ecs-buyer -c /root/ecs/ecs-buy-configs.yaml --node-count ${buyCount}")
               val ret = proc.run()
-              if (ret.exitValue == 0) {
+              retVal = ret.exitValue
+              if (retVal == 0) {
                 logging.info(this, s"buying ecs success, ${buyCount} nodes added")
               } else {
-                logging.info(this, s"buying ${buyCount} nodes ecs failed: ${ret.exitValue}")
+                logging.error(this, s"buying ${buyCount} nodes ecs failed: ${ret.exitValue}")
               }
               buying = false
             } else {
@@ -123,18 +126,18 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             // TODO: 3 times check
             if (!deleting) {
               deleting = true
-              var deleteCount = 5
+              var deleteCount = 1
               if (currentNodesCount - deleteCount > minNodesCfg) {
                 deleteCount = currentNodesCount - minNodesCfg
               }
               val proc =
                 Process(s"/root/ecs/ecs-deleter -c /root/ecs/ecs-delete-configs.yaml --node-count ${deleteCount}")
-              Process(s"/bin/linux/arm64/ali-ecs-deleter -c /ecs-delete-configs.yaml --node-count ${deleteCount}")
               val ret = proc.run()
-              if (ret.exitValue == 0) {
+              retVal = ret.exitValue
+              if (retVal == 0) {
                 logging.info(this, s"delete ecs success, ${deleteCount} nodes deleted")
               } else {
-                logging.info(this, s"deleting ${deleteCount} nodes ecs failed: ${ret.exitValue}")
+                logging.error(this, s"deleting ${deleteCount} nodes ecs failed: ${ret.exitValue}")
               }
               deleting = false
             } else {
@@ -143,7 +146,11 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             resourceFeed ! MessageFeed.Processed // block the queue
         }
 
-        Future.successful(())
+        if (retVal != 0) {
+          Future.successful(())
+        } else {
+          Future.failed(throw new Exception(s"handle ecs nodes failed: ${retVal}"))
+        }
       }
       .recoverWith {
         case t =>
