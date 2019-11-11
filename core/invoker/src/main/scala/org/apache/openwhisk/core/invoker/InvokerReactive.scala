@@ -299,6 +299,7 @@ class InvokerReactive(
   Scheduler.scheduleWaitAtMost(10.seconds)(() => {
     // TODO: 3 times check && node count determination
     logging.info(this, "TODO: 3 times check && node count determination")
+    Future.successful(())
 //    val msg = Metric("slotsTooMuch", 2) // remove 2 nodes
 //    val resTopic = "resource"
 //    healthProducer.send(resTopic, msg).andThen {
