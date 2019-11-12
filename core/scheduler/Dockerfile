@@ -39,17 +39,12 @@ COPY ecs-buy-configs.yaml /
 RUN chmod +x init.sh && tar -zxvf ali-ecs-buyer.tar.gz
 =======
 COPY scripts/init.sh /
-COPY scripts/kubeadm /usr/bin/
-COPY scripts/kubectl /usr/bin/
-COPY scripts/config /root/.kube/
-ADD scripts/ali-ecs-buyer.tar.gz /
-COPY scripts/ecs-buy-configs.yaml /
-ADD scripts/ali-ecs-deleter.tar.gz /
-COPY scripts/ecs-delete-configs.yaml /
-COPY scripts/join-k8s.sh /
-COPY scripts/joiner.sh /
 RUN chmod +x init.sh
 >>>>>>> 910ac224... add k8s join nodes script and renew dockerfile
+
+COPY scripts/kubeadm scripts/kubectl /usr/bin/
+COPY scripts/kube-config /root/.kube/config
+COPY scripts/ecs-buyer scripts/ecs-buy-configs.yaml scripts/ecs-deleter scripts/ecs-delete-configs.yaml scripts/join-k8s.sh scripts/joiner-key.sh scripts/joiner-pwd.sh scripts/ssh-key /root/ecs/
 
 # When running the scheduler as a non-root user this has implications on the standard directory where runc stores its data.
 # The non-root user should have access on the directory and corresponding permission to make changes on it.

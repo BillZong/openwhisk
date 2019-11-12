@@ -107,7 +107,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
               if (buyCount + currentNodesCount > maxNodesCfg) {
                 buyCount = maxNodesCfg - currentNodesCount
               }
-              val proc = Process(s"/bin/linux/arm64/ali-ecs-buyer -c /ecs-buy-configs.yaml --node-count ${buyCount}")
+              val proc = Process(s"/root/ecs/ecs-buyer -c /root/ecs/ecs-buy-configs.yaml --node-count ${buyCount}")
               val ret = proc.run()
               if (ret.exitValue == 0) {
                 logging.info(this, s"buying ecs success, ${buyCount} nodes added")
@@ -128,7 +128,8 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
                 deleteCount = currentNodesCount - minNodesCfg
               }
               val proc =
-                Process(s"/bin/linux/arm64/ali-ecs-deleter -c /ecs-delete-configs.yaml --node-count ${deleteCount}")
+                Process(s"/root/ecs/ecs-deleter -c /root/ecs/ecs-delete-configs.yaml --node-count ${deleteCount}")
+              Process(s"/bin/linux/arm64/ali-ecs-deleter -c /ecs-delete-configs.yaml --node-count ${deleteCount}")
               val ret = proc.run()
               if (ret.exitValue == 0) {
                 logging.info(this, s"delete ecs success, ${deleteCount} nodes deleted")
