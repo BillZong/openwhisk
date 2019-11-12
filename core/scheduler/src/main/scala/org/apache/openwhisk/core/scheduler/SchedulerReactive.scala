@@ -100,7 +100,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
               if (buyCount + currentNodesCount > maxNodesCfg) {
                 buyCount = maxNodesCfg - currentNodesCount
               }
-              val proc = Process(s"/bin/linux/arm64/ali-ecs-buyer -c /ecs-configs.yaml --node-count ${buyCount}")
+              val proc = Process(s"/bin/linux/arm64/ali-ecs-buyer -c /ecs-buy-configs.yaml --node-count ${buyCount}")
               val ret = proc.run()
               if (ret.exitValue == 0) {
                 logging.info(this, s"buying ecs success, ${buyCount} nodes added")

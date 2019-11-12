@@ -3,4 +3,4 @@
 !build/distributions
 !build/tmp/docker-coverage
 !ali-ecs-buyer.tar.gz
-!ecs-configs.yaml
+!ecs-buy-configs.yaml

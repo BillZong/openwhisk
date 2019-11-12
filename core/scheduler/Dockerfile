@@ -40,7 +40,7 @@ ADD build/distributions/scheduler.tar ./
 
 COPY init.sh /
 COPY ali-ecs-buyer.tar.gz /
-COPY ecs-configs.yaml /
+COPY ecs-buy-configs.yaml /
 RUN chmod +x init.sh && tar -zxvf ali-ecs-buyer.tar.gz
 
 # When running the scheduler as a non-root user this has implications on the standard directory where runc stores its data.
