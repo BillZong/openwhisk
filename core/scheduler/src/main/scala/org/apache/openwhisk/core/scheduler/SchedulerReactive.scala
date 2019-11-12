@@ -24,7 +24,7 @@ import akka.stream.ActorMaterializer
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.connector._
 import org.apache.openwhisk.core.containerpool.logging.LogStoreProvider
-import org.apache.openwhisk.core.entity._
+import org.apache.openwhisk.core.entity.{InvokerNodeLimit, SchedulerInstanceId}
 import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.spi.SpiLoader
 
@@ -49,7 +49,9 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
 
   implicit val materializer: ActorMaterializer = ActorMaterializer()
   implicit val ec: ExecutionContext = actorSystem.dispatcher
-  implicit val cfg: WhiskConfig = config
+  val minNodesCfg = InvokerNodeLimit.config.min
+  val maxNodesCfg = InvokerNodeLimit.config.max
+  var currentNodesCount = 0
 
   private val logsProvider = SpiLoader.get[LogStoreProvider].instance(actorSystem)
   logging.info(this, s"LogStoreProvider: ${logsProvider.getClass}")
@@ -86,15 +88,24 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
         msg.metricName match {
           case "memoryTotal" =>
             resourcePool("memoryTotal") = msg.metricValue // MB
+            resourceFeed ! MessageFeed.Processed
+          case "OnlineInvokerCount" =>
+            currentNodesCount = msg.metricValue.toInt // 在线的Invoker数量
           case "slotsNotEnough" =>
+            resourceFeed ! MessageFeed.Processed // don't block the queue
+            // TODO: 3 times check
             if (!resourceHandling) {
               resourceHandling = true
-              val proc = Process("/bin/linux/arm64/ali-ecs-buyer -c /ecs-configs.yaml")
+              var buyCount = 5
+              if (buyCount + currentNodesCount > maxNodesCfg) {
+                buyCount = maxNodesCfg - currentNodesCount
+              }
+              val proc = Process(s"/bin/linux/arm64/ali-ecs-buyer -c /ecs-configs.yaml --node-count ${buyCount}")
               val ret = proc.run()
               if (ret.exitValue == 0) {
-                logging.info(this, s"buying ecs success, 5 nodes added")
+                logging.info(this, s"buying ecs success, ${buyCount} nodes added")
               } else {
-                logging.info(this, s"buying ecs failed: ${ret.exitValue}")
+                logging.info(this, s"buying ${buyCount} nodes ecs failed: ${ret.exitValue}")
               }
               resourceHandling = false
             } else {
@@ -102,7 +113,6 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             }
         }
 
-        resourceFeed ! MessageFeed.Processed
         Future.successful(())
       }
       .recoverWith {

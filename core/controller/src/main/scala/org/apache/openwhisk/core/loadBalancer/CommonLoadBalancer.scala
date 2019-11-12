@@ -80,6 +80,11 @@ abstract class CommonLoadBalancer(config: WhiskConfig,
 
   actorSystem.scheduler.schedule(10.seconds, 10.seconds)(emitMetrics())
 
+  protected def updateInvokerStatus() = {
+    invokerPool ! InvokerSupervisionMessage(totalActivations)
+  }
+  actorSystem.scheduler.schedule(30.seconds, 30.seconds)(updateInvokerStatus())
+
   override def activeActivationsFor(namespace: UUID): Future[Int] =
     Future.successful(activationsPerNamespace.get(namespace).map(_.intValue).getOrElse(0))
   override def totalActiveActivations: Future[Int] = Future.successful(totalActivations.intValue)

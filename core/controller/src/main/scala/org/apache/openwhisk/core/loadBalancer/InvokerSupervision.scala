@@ -18,6 +18,7 @@
 package org.apache.openwhisk.core.loadBalancer
 
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.atomic.LongAdder
 
 import scala.collection.immutable
 import scala.concurrent.{Await, ExecutionContext, Future}
@@ -33,7 +34,7 @@ import akka.event.Logging.InfoLevel
 import akka.pattern.pipe
 import akka.util.Timeout
 import org.apache.openwhisk.common._
-import org.apache.openwhisk.core.{WhiskConfig}
+import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.connector._
 //import org.apache.openwhisk.core.containerpool.ContainerPoolConfig
 import org.apache.openwhisk.core.database.NoDocumentException
@@ -84,6 +85,9 @@ object InvocationFinishedResult {
 case class ActivationRequest(msg: ActivationMessage, invoker: InvokerInstanceId)
 case class InvocationFinishedMessage(invokerInstance: InvokerInstanceId, result: InvocationFinishedResult)
 
+// Sent to a scheduler for resource scheduling
+case class InvokerSupervisionMessage(totalActivations: LongAdder)
+
 // Sent to a monitor if the state changed
 case class CurrentInvokerPoolState(newState: IndexedSeq[InvokerHealth])
 
@@ -132,6 +136,9 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
   protected val messageConsumer =
     messagingProvider.getConsumer(wskConfig, "1", "2")(logging, context.system)
 
+  // activation duration in milliseconds, for RPS counting
+  var durations = 0
+
   def receive: Receive = {
     case p: PingMessage =>
       val invoker = instanceToRef.getOrElse(p.instance.toInt, registerInvoker(p.instance))
@@ -166,26 +173,43 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
 
     // this is only used for the internal test action which enabled an invoker to become healthy again
     case msg: ActivationRequest => sendActivationToInvoker(msg.msg, msg.invoker).pipeTo(sender)
+
+    // this is only used for uploading invoker status for scheduler
+    case _: InvokerSupervisionMessage => publishInvokerCount()
   }
 
   def logStatus(): Unit = {
     monitor.foreach(_ ! CurrentInvokerPoolState(status))
     // send invoker resource capacity to kafka for someone who's interested
-    publishResourceCapacity(controllerInstanceId)
+    publishResourceCapacity()
 
     val pretty = status.map(i => s"${i.id.toInt} -> ${i.status}")
     logging.info(this, s"invoker status changed to ${pretty.mkString(", ")}")
   }
 
-  private def publishResourceCapacity(controllerInstanceId: ControllerInstanceId): Future[RecordMetadata] = {
+  private def publishInvokerCount(): Future[RecordMetadata] = {
+    val topic = "resource"
+
+    val start = transid.started(
+      this,
+      LoggingMarkers.CONTROLLER_KAFKA,
+      s"posting topic '$topic' with controller id '${controllerInstanceId}'",
+      logLevel = InfoLevel)
+
+    // Message
+    val msg = Metric("OnlineInvokerCount", status.filter(_.status != Offline).length)
+
+    messageProducer.send(topic, msg).andThen {
+      case Failure(_) => transid.failed(this, start, s"error on posting to topic $topic")
+    }
+  }
+
+  private def publishResourceCapacity(): Future[RecordMetadata] = {
     val topic = "resource"
 
 //    val healthyInvokerMemory = status.filter(_.status == Healthy).length * poolConfig.userMemory.toMB
     val healthyInvokerMemory = status.filter(_.status == Healthy).length * 2048 // MB. for testing
 
-    MetricEmitter.emitGaugeMetric(
-      LoggingMarkers.LOADBALANCER_RESOURCE_TOTAL(controllerInstanceId),
-      healthyInvokerMemory)
     val start = transid.started(
       this,
       LoggingMarkers.CONTROLLER_KAFKA,
