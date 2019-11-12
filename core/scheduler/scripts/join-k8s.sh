@@ -7,11 +7,10 @@ sysname=`uname`
 # params analyzing
 if [ ${sysname}='Darwin' ]; then
     # this shell only works on Mac and bash now.
-    ARGS=`getopt h:n:u:p:P: $@`
+    ARGS=`getopt h:n:u:p:P:s: $@`
 elif [ ${sysname}='Linux' || ${sysname}='Unix' ]; then
     # this only works on linux/unix.
-    #ARGS=`getopt -o h:u:p:n: -l hosts:,user:,password:,names: -n "getopt.sh" -- "$@"`
-    ARGS=`getopt -o h:n:u:p:P: -l hosts:,names:,user:,password:,port: -- "$@"`
+    ARGS=`getopt -o h:n:u:p:P:s: -l hosts:,names:,user:,password:,port:ssh-file: -- "$@"`
 else
     echo "Windows not supported yet"
 fi
@@ -62,6 +61,10 @@ do
             port=$2
             shift 2
             ;;
+        -s|--ssh-file)
+            sshFile=$2
+            shift 2
+            ;;
         --)
             shift;
             break;
@@ -77,8 +80,15 @@ if [ -z $user ]; then
     user="root"
 fi
 
-if [ -z $password ]; then
-    password="123456"
+if [ -n $sshFile ]; then
+    join_file="./joiner-key.sh"
+    key=$sshFile
+elif [ -n $password ]; then
+    join_file="./joiner-pwd.sh"
+    key=$password
+else
+    echo "no ssh key file and password, could not login"
+    exit 1
 fi
 
 if [ -z $port ]; then
@@ -93,19 +103,19 @@ kubeadm token create --ttl 5m --print-join-command >$join_token_cmd_file
 # ssh 所有节点，并将其加入K8S集群
 if [ -n "$hostsArr" ]; then
     for host in ${hostsArr[@]}; do
-        ./joiner.sh $host $port $user $password $join_token_cmd_file
+        $join_file $host $port $user $key $join_token_cmd_file
     done
 else
-    ./joiner.sh $hosts $port $user $password $join_token_cmd_file
+    $join_file $hosts $port $user $key $join_token_cmd_file
 fi
 
 # 将每个节点都打上标签
 if [ -n "$namesArr" ]; then
     for nodeName in ${namesArr[@]}; do
-        kubectl label nodes $nodeName openwhisk-role=invoker
+        kubectl label nodes $nodeName openwhisk-role=invoker --overwrite
     done
 else
-    kubectl label nodes $names openwhisk-role=invoker
+    kubectl label nodes $names openwhisk-role=invoker --overwrite
 fi
 
 # 移除token文件

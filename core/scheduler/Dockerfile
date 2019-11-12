@@ -32,15 +32,8 @@ RUN apk add --update openssl openssh-client expect
 
 ADD build/distributions/scheduler.tar ./
 
-<<<<<<< HEAD
-COPY init.sh /
-COPY ali-ecs-buyer.tar.gz /
-COPY ecs-buy-configs.yaml /
-RUN chmod +x init.sh && tar -zxvf ali-ecs-buyer.tar.gz
-=======
 COPY scripts/init.sh /
 RUN chmod +x init.sh
->>>>>>> 910ac224... add k8s join nodes script and renew dockerfile
 
 COPY scripts/kubeadm scripts/kubectl /usr/bin/
 COPY scripts/kube-config /root/.kube/config
