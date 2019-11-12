@@ -422,11 +422,6 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
     val numInvokers = invokers.size
 
     if (numInvokers > 0) {
-      // TODO: need to delete this test
-      val dilemma = Metric("slotsNotEnough", slots.toLong)
-      messagingProvider.getProducer(whiskConfig).send("resource", dilemma)
-      logging.info(this, s"send some resource scheduler test dilemma: ${dilemma}")
-
       val invoker = invokers(index)
       //test this invoker - if this action supports concurrency, use the scheduleConcurrent function
       if (invoker.status.isUsable && dispatched(invoker.id.toInt).tryAcquireConcurrent(fqn, maxConcurrent, slots)) {
