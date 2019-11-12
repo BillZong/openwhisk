@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+# scheduler
 FROM scala
 
 ENV UID=1001 \
@@ -24,24 +25,31 @@ ENV UID=1001 \
 # Docker server version and the scheduler docker version must be the same to enable runc usage.
 # If this cannot be guaranteed, set `invoker_use_runc: false` in the ansible env.
 
+# use http for ssl not working right in some districts.
+RUN sed -i 's/https\:\/\/alpine.global.ssl.fastly.net/http\:\/\/dl-cdn.alpinelinux.org/g' /etc/apk/repositories
 
-RUN apk add --update openssl
-
-# Uncomment to fetch latest version of docker instead: RUN wget -qO- https://get.docker.com | sh
-# Install docker client
-RUN curl -sSL -o docker-${DOCKER_VERSION}.tgz https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz && \
-    tar --strip-components 1 -xvzf docker-${DOCKER_VERSION}.tgz -C /usr/bin docker/docker && \
-    tar --strip-components 1 -xvzf docker-${DOCKER_VERSION}.tgz -C /usr/bin docker/docker-runc && \
-    rm -f docker-${DOCKER_VERSION}.tgz && \
-    chmod +x /usr/bin/docker && \
-    chmod +x /usr/bin/docker-runc
+RUN apk add --update openssl openssh-client expect
 
 ADD build/distributions/scheduler.tar ./
 
+<<<<<<< HEAD
 COPY init.sh /
 COPY ali-ecs-buyer.tar.gz /
 COPY ecs-buy-configs.yaml /
 RUN chmod +x init.sh && tar -zxvf ali-ecs-buyer.tar.gz
+=======
+COPY scripts/init.sh /
+COPY scripts/kubeadm /usr/bin/
+COPY scripts/kubectl /usr/bin/
+COPY scripts/config /root/.kube/
+ADD scripts/ali-ecs-buyer.tar.gz /
+COPY scripts/ecs-buy-configs.yaml /
+ADD scripts/ali-ecs-deleter.tar.gz /
+COPY scripts/ecs-delete-configs.yaml /
+COPY scripts/join-k8s.sh /
+COPY scripts/joiner.sh /
+RUN chmod +x init.sh
+>>>>>>> 910ac224... add k8s join nodes script and renew dockerfile
 
 # When running the scheduler as a non-root user this has implications on the standard directory where runc stores its data.
 # The non-root user should have access on the directory and corresponding permission to make changes on it.
