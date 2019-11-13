@@ -65,6 +65,7 @@ ansible/roles/nginx/files/*p12
 ansible/roles/kafka/files/*
 ansible/roles/controller/files/*
 ansible/roles/invoker/files/*
+ansible/roles/scheduler/files/*
 
 # .zip files must be explicited whitelisted
 *.zip
