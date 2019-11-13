@@ -39,7 +39,7 @@ set join_token_cmd [getJoinTokenCmd [lindex $argv 4]]
 spawn ssh -i $ssh_key_file_path -p $port $user@$host
 
 # 检测密钥方式连接和密码，没有会超时自动跳过
-expect "yes/no" { send "yes\r"; exp_continue }
+expect "yes/no" { send "no\r"; exp_continue }
 
 expect "$user@"
 
