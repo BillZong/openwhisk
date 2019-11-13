@@ -251,6 +251,12 @@ scheduler:
     keystore:
       password: "{{ scheduler_keystore_password | default('openwhisk') }}"
       name: "{{ __scheduler_ssl_keyPrefix }}openwhisk-keystore.p12"
+  nodes:
+    max: "{{ scheduler_nodes_max | default(10) }}"
+    min: "{{ scheduler_nodes_min | default(1) }}"
+  drain:
+    percentage: "{{ scheduler_drain_percentage | default(10) }}"
+    duration: "{{ scheduler_drain_duration | default(60) }}"
 
 userLogs:
   spi: "{{ userLogs_spi | default('org.apache.openwhisk.core.containerpool.logging.DockerToActivationLogStoreProvider') }}"
