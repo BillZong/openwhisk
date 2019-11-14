@@ -21,7 +21,7 @@ import akka.actor.ActorRef
 import akka.actor.ActorRefFactory
 import java.util.concurrent.ThreadLocalRandom
 
-import akka.actor.{Actor, ActorSystem, Cancellable, Props}
+import akka.actor.{Actor, ActorSystem, Cancellable, Props, Timers}
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member, MemberStatus}
 import akka.management.scaladsl.AkkaManagement
@@ -168,6 +168,7 @@ class ShardingContainerPoolBalancer(
 
   override protected def emitMetrics() = {
     super.emitMetrics()
+
     MetricEmitter.emitGaugeMetric(
       INVOKER_TOTALMEM_BLACKBOX,
       schedulingState.blackboxInvokers.foldLeft(0L) { (total, curr) =>
@@ -214,13 +215,19 @@ class ShardingContainerPoolBalancer(
    * [[ShardingContainerPoolBalancerState.updateInvokers]] and [[ShardingContainerPoolBalancerState.updateCluster]]
    * are called exclusive of each other and not concurrently.
    */
-  private val monitor = actorSystem.actorOf(Props(new Actor {
+  private val monitor = actorSystem.actorOf(Props(new Actor with Timers {
     override def preStart(): Unit = {
       cluster.foreach(_.subscribe(self, classOf[MemberEvent], classOf[ReachabilityEvent]))
     }
 
     // all members of the cluster that are available
     var availableMembers = Set.empty[Member]
+
+    // Timer to report status
+    private case object UploadResourceKey
+    private case object UploadResourceFirstTick
+    private case object UploadResourceTick
+    timers.startSingleTimer(UploadResourceKey, UploadResourceFirstTick, 10.seconds)
 
     override def receive: Receive = {
       case CurrentInvokerPoolState(newState) =>
@@ -246,17 +253,21 @@ class ShardingContainerPoolBalancer(
         }
 
         schedulingState.updateCluster(availableMembers.size)
+      case UploadResourceFirstTick =>
+        timers.startPeriodicTimer(UploadResourceKey, UploadResourceTick, 10.seconds)
+      case UploadResourceTick =>
+        updateInvokerMemoryUsage()
+    }
+
+    private val schedulerProducer = messagingProvider.getProducer(config)
+    private def updateInvokerMemoryUsage() = {
+      val totalInvokerMemory = schedulingState.totalSlotCount
+      val totalUsedMemory = totalBlackBoxActivationMemory.longValue + totalManagedActivationMemory.longValue
+      val msg = Metric("memoryUsedPercentage", totalUsedMemory * 100 / totalInvokerMemory)
+      logging.info(this, s"send memoryUsedPercentage msg: $msg")
+      schedulerProducer.send("resource", msg)
     }
   }))
-
-  private val schedulerProducer = messagingProvider.getProducer(config)
-  private def updateInvokerMemoryUsage() = {
-    val totalInvokerMemory = schedulingState.totalSlotCount
-    val totalUsedMemory = totalBlackBoxActivationMemory.longValue + totalManagedActivationMemory.longValue
-    val msg = Metric("memoryUsedPercentage", totalUsedMemory * 100 / totalInvokerMemory)
-    schedulerProducer.send("resource", msg)
-  }
-  actorSystem.scheduler.schedule(10.seconds, 10.seconds)(updateInvokerMemoryUsage())
 
   /** Loadbalancer interface methods */
   override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = Future.successful(schedulingState.invokers)
