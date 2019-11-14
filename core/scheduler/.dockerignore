@@ -1,10 +1,4 @@
 *
 !scripts
 !build/distributions
-<<<<<<< HEAD
 !build/tmp/docker-coverage
-!ali-ecs-buyer.tar.gz
-!ecs-buy-configs.yaml
-=======
-!build/tmp/docker-coverage
->>>>>>> 910ac224... add k8s join nodes script and renew dockerfile
