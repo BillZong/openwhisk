@@ -100,11 +100,4 @@ core/routemgmt/getApi/package-lock.json
 core/routemgmt/getApi/utils.js
 
 # scheduler binary and config files
-core/scheduler/scripts/ecs-buy-configs.yaml
-core/scheduler/scripts/ecs-buyer
-core/scheduler/scripts/ecs-delete-configs.yaml
-core/scheduler/scripts/ecs-deleter
-core/scheduler/scripts/kube-config
-core/scheduler/scripts/kubeadm
-core/scheduler/scripts/kubectl
-core/scheduler/scripts/ssh-key
+core/scheduler/scripts/
