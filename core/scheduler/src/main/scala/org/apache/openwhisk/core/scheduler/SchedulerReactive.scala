@@ -102,7 +102,10 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
         msg.metricName match {
           case "memoryUsedPercentage" =>
             avgResourcePercentage = msg.metricValue.toInt
-            if (!handlingUnderThreshold && avgResourcePercentage < resourceDrainCfg.minPercentage) {
+            if (avgResourcePercentage >= resourceDrainCfg.minPercentage) {
+              // once exceed the limit, postpone the deleting process
+              lastCountTime = DateTime.now
+            } else if (!handlingUnderThreshold) {
               // under threshold
               handlingUnderThreshold = true
               val now = DateTime.now
