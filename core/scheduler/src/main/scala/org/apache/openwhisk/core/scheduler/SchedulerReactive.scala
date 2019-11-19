@@ -133,7 +133,8 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
               if (buyCount + currentNodesCount > invokerNodeLimits.max) {
                 buyCount = invokerNodeLimits.max - currentNodesCount
               }
-              val proc = Process(s"/root/ecs/ecs-buyer -c /root/ecs/ecs-buy-configs.yaml --node-count ${buyCount}")
+              val proc = Process(
+                s"/root/node-handler/node-joiner -c /root/node-handler/node-joiner-configs.yaml --node-count ${buyCount}")
               val ret = proc.run()
               retVal = ret.exitValue
               if (retVal == 0) {
@@ -155,7 +156,8 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
                 deleteCount = currentNodesCount - invokerNodeLimits.min
               }
               val proc =
-                Process(s"/root/ecs/ecs-deleter -c /root/ecs/ecs-delete-configs.yaml --node-count ${deleteCount}")
+                Process(
+                  s"/root/node-handler/node-deleter -c /root/node-handler/node-deleter-configs.yaml --node-count ${deleteCount}")
               val ret = proc.run()
               retVal = ret.exitValue
               if (retVal == 0) {
