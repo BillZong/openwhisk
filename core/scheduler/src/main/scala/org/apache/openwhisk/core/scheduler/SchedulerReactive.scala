@@ -129,18 +129,22 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             // TODO: 3 times check
             if (!buying) {
               buying = true
-              var buyCount = 1
-              if (buyCount + currentNodesCount > invokerNodeLimits.max) {
-                buyCount = invokerNodeLimits.max - currentNodesCount
+              var joinCount = 1
+              if (joinCount + currentNodesCount > invokerNodeLimits.max) {
+                joinCount = invokerNodeLimits.max - currentNodesCount
               }
-              val proc = Process(
-                s"/root/node-handler/node-joiner -c /root/node-handler/node-joiner-configs.yaml --node-count ${buyCount}")
-              val ret = proc.run()
-              retVal = ret.exitValue
-              if (retVal == 0) {
-                logging.info(this, s"buying ecs success, ${buyCount} nodes added")
+              if (joinCount <= 0) {
+                logging.info(this, "cluster nodes reach max, no nodes could be joined now")
               } else {
-                logging.error(this, s"buying ${buyCount} nodes ecs failed: ${ret.exitValue}")
+                val proc = Process(
+                  s"/root/node-handler/node-joiner -c /root/node-handler/node-joiner-configs.yaml --node-count ${joinCount}")
+                val ret = proc.run()
+                retVal = ret.exitValue
+                if (retVal == 0) {
+                  logging.info(this, s"joining nodes success, ${joinCount} nodes added")
+                } else {
+                  logging.error(this, s"joining ${joinCount} nodes failed: ${ret.exitValue}")
+                }
               }
               buying = false
             } else {
@@ -152,18 +156,22 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             if (!deleting) {
               deleting = true
               var deleteCount = 1
-              if (currentNodesCount - deleteCount > invokerNodeLimits.min) {
+              if (currentNodesCount - deleteCount < invokerNodeLimits.min) {
                 deleteCount = currentNodesCount - invokerNodeLimits.min
               }
-              val proc =
-                Process(
-                  s"/root/node-handler/node-deleter -c /root/node-handler/node-deleter-configs.yaml --node-count ${deleteCount}")
-              val ret = proc.run()
-              retVal = ret.exitValue
-              if (retVal == 0) {
-                logging.info(this, s"delete ecs success, ${deleteCount} nodes deleted")
+              if (deleteCount <= 0) {
+                logging.info(this, "cluster nodes reach min, no nodes could be deleted now")
               } else {
-                logging.error(this, s"deleting ${deleteCount} nodes ecs failed: ${ret.exitValue}")
+                val proc =
+                  Process(
+                    s"/root/node-handler/node-deleter -c /root/node-handler/node-deleter-configs.yaml --node-count ${deleteCount}")
+                val ret = proc.run()
+                retVal = ret.exitValue
+                if (retVal == 0) {
+                  logging.info(this, s"delete nodes success, ${deleteCount} nodes deleted")
+                } else {
+                  logging.error(this, s"deleting ${deleteCount} nodes failed: ${ret.exitValue}")
+                }
               }
               deleting = false
             } else {
@@ -174,7 +182,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
         if (retVal == 0) {
           Future.successful(())
         } else {
-          Future.failed(throw new Exception(s"handle ecs nodes failed: ${retVal}"))
+          Future.failed(throw new Exception(s"nodes handling failed: ${retVal}"))
         }
       }
       .recoverWith {
