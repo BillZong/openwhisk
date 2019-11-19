@@ -29,14 +29,17 @@ import akka.actor.{Actor, ActorRef, ActorRefFactory, FSM, Props}
 import akka.actor.FSM.CurrentState
 import akka.actor.FSM.SubscribeTransitionCallBack
 import akka.actor.FSM.Transition
+import akka.event.Logging.InfoLevel
 import akka.pattern.pipe
 import akka.util.Timeout
 import org.apache.openwhisk.common._
+import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.connector._
 import org.apache.openwhisk.core.database.NoDocumentException
 import org.apache.openwhisk.core.entity.ActivationId.ActivationIdGenerator
 import org.apache.openwhisk.core.entity._
 import org.apache.openwhisk.core.entity.types.EntityStore
+import org.apache.openwhisk.spi.SpiLoader
 
 // Received events
 case object GetStatus
@@ -100,7 +103,8 @@ final case class InvokerInfo(buffer: RingBuffer[InvocationFinishedResult])
 class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef,
                   sendActivationToInvoker: (ActivationMessage, InvokerInstanceId) => Future[RecordMetadata],
                   pingConsumer: MessageConsumer,
-                  monitor: Option[ActorRef])
+                  monitor: Option[ActorRef],
+                  controllerInstanceId: ControllerInstanceId)
     extends Actor {
 
   import InvokerState._
@@ -116,6 +120,12 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
   var refToInstance = immutable.Map.empty[ActorRef, InvokerInstanceId]
   var status = IndexedSeq[InvokerHealth]()
 
+  // msg queue
+  private val wskConfig = new WhiskConfig(WhiskConfig.kafkaHosts)
+  private val messagingProvider = SpiLoader.get[MessagingProvider]
+  protected val messageProducer =
+    messagingProvider.getProducer(wskConfig, Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT))(logging, context.system)
+
   def receive: Receive = {
     case p: PingMessage =>
       val invoker = instanceToRef.getOrElse(p.instance.toInt, registerInvoker(p.instance))
@@ -130,7 +140,7 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
 
       invoker.forward(p)
 
-    case GetStatus => sender() ! status
+    case GetStatus => sender() ! status // for testing
 
     case msg: InvocationFinishedMessage =>
       // Forward message to invoker, if InvokerActor exists
@@ -153,9 +163,34 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
   }
 
   def logStatus(): Unit = {
+    publishOnlineInvokerCount()
+
     monitor.foreach(_ ! CurrentInvokerPoolState(status))
     val pretty = status.map(i => s"${i.id.toInt} -> ${i.status}")
     logging.info(this, s"invoker status changed to ${pretty.mkString(", ")}")
+  }
+
+  private def publishOnlineInvokerCount() = {
+    val topic = "resource"
+
+    val start = transid.started(
+      this,
+      LoggingMarkers.CONTROLLER_KAFKA,
+      s"posting topic '$topic' with controller id '${controllerInstanceId}'",
+      logLevel = InfoLevel)
+
+    // Message
+    val msg = Metric("OnlineInvokerCount", status.filter(_.status != Offline).length)
+
+    messageProducer.send(topic, msg).andThen {
+      case Success(status) =>
+        transid.finished(
+          this,
+          start,
+          s"posted to ${status.topic()}[${status.partition()}][${status.offset()}]",
+          logLevel = InfoLevel)
+      case Failure(_) => transid.failed(this, start, s"error on posting to topic $topic")
+    }
   }
 
   /** Receive Ping messages from invokers. */
@@ -254,8 +289,9 @@ object InvokerPool {
   def props(f: (ActorRefFactory, InvokerInstanceId) => ActorRef,
             p: (ActivationMessage, InvokerInstanceId) => Future[RecordMetadata],
             pc: MessageConsumer,
-            m: Option[ActorRef] = None): Props = {
-    Props(new InvokerPool(f, p, pc, m))
+            m: Option[ActorRef] = None,
+            controllerInstanceId: ControllerInstanceId = ControllerInstanceId("0")): Props = {
+    Props(new InvokerPool(f, p, pc, m, controllerInstanceId))
   }
 
   /** A stub identity for invoking the test action. This does not need to be a valid identity. */
