@@ -23,7 +23,7 @@ apply plugin: 'org.scoverage'
 
 ext.dockerImageName = 'scheduler'
 apply from: '../../gradle/docker.gradle'
-distDocker.dependsOn ':common:scala:distDocker', 'distTar'
+distDocker.dependsOn 'downloadDependency', ':common:scala:distDocker', 'distTar'
 
 project.archivesBaseName = "openwhisk-scheduler"
 
@@ -31,7 +31,7 @@ ext.coverageDirs = [
     "${buildDir}/classes/scala/scoverage",
     "${project(':common:scala').buildDir.absolutePath}/classes/scala/scoverage"
 ]
-distDockerCoverage.dependsOn ':common:scala:scoverageClasses', 'scoverageClasses'
+distDockerCoverage.dependsOn 'downloadDependency', ':common:scala:scoverageClasses', 'scoverageClasses'
 
 repositories {
     mavenCentral()
@@ -53,6 +53,19 @@ dependencies {
 
 tasks.withType(ScalaCompile) {
     scalaCompileOptions.additionalParameters = gradle.scala.compileFlags
+}
+
+task downloadDependency {
+    doLast {
+        def cmd1 = "chmod +x $projectDir/download-binray.sh"
+        println(cmd1)
+        cmd1.execute().consumeProcessOutput(System.out, System.err)
+        def cmd2 = "$projectDir/download-binray.sh $projectDir"
+        println(cmd2)
+        def proc = cmd2.execute()
+        proc.consumeProcessOutput(System.out, System.err)
+        proc.waitForOrKill(dockerTimeout * 1000)
+    }
 }
 
 mainClassName = "org.apache.openwhisk.core.scheduler.Scheduler"
