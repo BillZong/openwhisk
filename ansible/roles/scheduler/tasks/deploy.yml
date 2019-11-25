@@ -227,6 +227,10 @@
       "CONFIG_whisk_scheduler_invokerNodes_min": "{{ scheduler.nodes.min }}"
       "CONFIG_whisk_scheduler_resourceDrainThreshold_minPercentage": "{{ scheduler.drain.percentage }}"
       "CONFIG_whisk_scheduler_resourceDrainThreshold_duration": "{{ scheduler.drain.duration }}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_joiner_bin": "{{ scheduler.nodeHandler.joiner.bin}}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_joiner_cfg": "{{ scheduler.nodeHandler.joiner.cfg}}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_deleter_bin": "{{ scheduler.nodeHandler.deleter.bin}}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_deleter_cfg": "{{ scheduler.nodeHandler.deleter.cfg}}"
 
 - name: extend scheduler dns env
   set_fact:

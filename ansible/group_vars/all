@@ -257,6 +257,13 @@ scheduler:
   drain:
     percentage: "{{ scheduler_drain_percentage | default(10) }}"
     duration: "{{ scheduler_drain_duration | default(60) }}"
+  nodeHandler:
+    joiner:
+      bin: "{{ scheduler_nodeHandler_joiner_bin | default('/root/node-handler/node-joiner')  }}"
+      cfg: "{{ scheduler_nodeHandler_joiner_cfg | default('/root/node-handler/node-joiner.configs.yaml')  }}"
+    deleter:
+      bin: "{{ scheduler_nodeHandler_deleter_bin | default('/root/node-handler/node-deleter')  }}"
+      cfg: "{{ scheduler_nodeHandler_deleter_cfg | default('/root/node-handler/node-deleter.configs.yaml')  }}"
 
 userLogs:
   spi: "{{ userLogs_spi | default('org.apache.openwhisk.core.containerpool.logging.DockerToActivationLogStoreProvider') }}"
