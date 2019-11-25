@@ -38,6 +38,7 @@ import sys.process._
 // config case class
 case class InvokerNodeLimitConfig(min: Int, max: Int)
 case class ResourceDrainThreshold(minPercentage: Int, duration: Int)
+case class NodeHandlerBinaryConfig(bin: String, cfg: String)
 
 object SchedulerReactive extends SchedulerProvider {
 
@@ -65,6 +66,9 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   private var avgResourcePercentage = resourceDrainCfg.minPercentage
   private var handlingUnderThreshold = false
   private var lastCountTime = DateTime.now // milliseconds
+
+  val nodeJoinerConfig = loadConfigOrThrow[NodeHandlerBinaryConfig]("whisk.scheduler.node-handler-binary.joiner")
+  val nodeDeleterConfig = loadConfigOrThrow[NodeHandlerBinaryConfig]("whisk.scheduler.node-handler-binary.deleter")
 
   private val logsProvider = SpiLoader.get[LogStoreProvider].instance(actorSystem)
   logging.info(this, s"LogStoreProvider: ${logsProvider.getClass}")
@@ -98,6 +102,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
       .flatMap { msg =>
         logging.info(this, s"scheduler${instance.asString} got resource msg: ${msg}")
         var retVal = 0
+        var exceptionMsg = ""
 
         msg.metricName match {
           case "memoryUsedPercentage" =>
@@ -139,14 +144,21 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
               if (joinCount <= 0) {
                 logging.info(this, "cluster nodes reach max, no nodes could be joined now")
               } else {
-                val proc = Process(
-                  s"/root/node-handler/node-joiner -c /root/node-handler/node-joiner-configs.yaml --node-count ${joinCount}")
-                val ret = proc.run()
-                retVal = ret.exitValue
-                if (retVal == 0) {
-                  logging.info(this, s"joining nodes success, ${joinCount} nodes added")
-                } else {
-                  logging.error(this, s"joining ${joinCount} nodes failed: ${ret.exitValue}")
+                try {
+                  val proc = Process(s"${nodeJoinerConfig.bin} -c ${nodeJoinerConfig.cfg} --node-count ${joinCount}")
+                  val ret = proc.run()
+                  retVal = ret.exitValue
+                  if (retVal == 0) {
+                    logging.info(this, s"joining nodes success, ${joinCount} nodes added")
+                  } else {
+                    exceptionMsg = "joining node scripts failed: see the log"
+                    logging.error(this, s"joining ${joinCount} nodes failed: ${ret.exitValue}")
+                  }
+                } catch {
+                  case e: Exception =>
+                    retVal = -1
+                    exceptionMsg = e.getMessage
+                    logging.error(this, s"joining ${joinCount} nodes failed with exception: ${e.getMessage}")
                 }
               }
               buying = false
@@ -165,15 +177,22 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
               if (deleteCount <= 0) {
                 logging.info(this, "cluster nodes reach min, no nodes could be deleted now")
               } else {
-                val proc =
-                  Process(
-                    s"/root/node-handler/node-deleter -c /root/node-handler/node-deleter-configs.yaml --node-count ${deleteCount}")
-                val ret = proc.run()
-                retVal = ret.exitValue
-                if (retVal == 0) {
-                  logging.info(this, s"delete nodes success, ${deleteCount} nodes deleted")
-                } else {
-                  logging.error(this, s"deleting ${deleteCount} nodes failed: ${ret.exitValue}")
+                try {
+                  val proc =
+                    Process(s"${nodeDeleterConfig.bin} -c ${nodeDeleterConfig.cfg} --node-count ${deleteCount}")
+                  val ret = proc.run()
+                  retVal = ret.exitValue
+                  if (retVal == 0) {
+                    logging.info(this, s"delete nodes success, ${deleteCount} nodes deleted")
+                  } else {
+                    exceptionMsg = "deleting node scripts failed: see the log"
+                    logging.error(this, s"deleting ${deleteCount} nodes failed: ${ret.exitValue}")
+                  }
+                } catch {
+                  case e: Exception =>
+                    retVal = -1
+                    exceptionMsg = e.getMessage
+                    logging.error(this, s"deleting ${deleteCount} nodes failed with exception: ${e.getMessage}")
                 }
               }
               deleting = false
@@ -185,7 +204,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
         if (retVal == 0) {
           Future.successful(())
         } else {
-          Future.failed(throw new Exception(s"nodes handling failed: ${retVal}"))
+          Future.failed(throw new Exception(exceptionMsg))
         }
       }
       .recoverWith {

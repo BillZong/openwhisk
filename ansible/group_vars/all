@@ -260,10 +260,10 @@ scheduler:
   nodeHandler:
     joiner:
       bin: "{{ scheduler_nodeHandler_joiner_bin | default('/root/node-handler/node-joiner')  }}"
-      cfg: "{{ scheduler_nodeHandler_joiner_cfg | default('/root/node-handler/node-joiner.configs.yaml')  }}"
+      cfg: "{{ scheduler_nodeHandler_joiner_cfg | default('/root/node-handler/node-joiner-configs.yaml')  }}"
     deleter:
       bin: "{{ scheduler_nodeHandler_deleter_bin | default('/root/node-handler/node-deleter')  }}"
-      cfg: "{{ scheduler_nodeHandler_deleter_cfg | default('/root/node-handler/node-deleter.configs.yaml')  }}"
+      cfg: "{{ scheduler_nodeHandler_deleter_cfg | default('/root/node-handler/node-deleter-configs.yaml')  }}"
 
 userLogs:
   spi: "{{ userLogs_spi | default('org.apache.openwhisk.core.containerpool.logging.DockerToActivationLogStoreProvider') }}"

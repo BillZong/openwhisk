@@ -172,12 +172,20 @@ class SchedulerTestService(scheduler: SchedulerCore)(implicit val actorSystem: A
           scheduler
             .processResourceMessage(Metric("slotsNotEnough", 256).serialize.getBytes(StandardCharsets.UTF_8))
             .map(_ => JsObject("status" -> 0.toJson))
+            .recover {
+              case e: Exception =>
+                JsObject("exception" -> e.getMessage.toJson)
+            }
         }
       } ~ path("delete") {
         complete {
           scheduler
             .processResourceMessage(Metric("slotsTooMuch", 10).serialize.getBytes(StandardCharsets.UTF_8))
             .map(_ => JsObject("status" -> 0.toJson))
+            .recover {
+              case e: Exception =>
+                JsObject("exception" -> e.getMessage.toJson)
+            }
         }
       }
     }
