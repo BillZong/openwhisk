@@ -180,7 +180,7 @@ class SchedulerTestService(scheduler: SchedulerCore)(implicit val actorSystem: A
       } ~ path("delete") {
         complete {
           scheduler
-            .processResourceMessage(Metric("slotsTooMuch", 10).serialize.getBytes(StandardCharsets.UTF_8))
+            .processResourceMessage(Metric("slotsTooMuch", 1).serialize.getBytes(StandardCharsets.UTF_8))
             .map(_ => JsObject("status" -> 0.toJson))
             .recover {
               case e: Exception =>

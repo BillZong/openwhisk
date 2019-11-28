@@ -232,6 +232,7 @@ class ShardingContainerPoolBalancer(
     override def receive: Receive = {
       case CurrentInvokerPoolState(newState) =>
         schedulingState.updateInvokers(newState)
+        schedulerProducer.send("resource", Metric("memoryTotal", schedulingState.totalSlotCount))
 
       // State of the cluster as it is right now
       case CurrentClusterState(members, _, _, _, _) =>
