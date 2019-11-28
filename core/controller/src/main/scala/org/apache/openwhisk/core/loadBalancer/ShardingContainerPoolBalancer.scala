@@ -17,6 +17,8 @@
 
 package org.apache.openwhisk.core.loadBalancer
 
+import java.nio.charset.StandardCharsets
+
 import akka.actor.ActorRef
 import akka.actor.ActorRefFactory
 import java.util.concurrent.ThreadLocalRandom
@@ -43,6 +45,7 @@ import org.apache.openwhisk.spi.SpiLoader
 import scala.annotation.tailrec
 import scala.concurrent.Future
 import scala.concurrent.duration._
+import scala.util.{Failure, Success}
 
 /**
  * A loadbalancer that schedules workload based on a hashing-algorithm.
@@ -337,6 +340,33 @@ class ShardingContainerPoolBalancer(
           s"failed to schedule activation ${msg.activationId}, action '${msg.action.asString}' ($actionType), ns '${msg.user.namespace.name.asString}' - invokers to use: $invokerStates")
         Future.failed(LoadBalancerException("No invokers available"))
       }
+  }
+
+  /** Receive Ping messages from invokers. */
+  val schedulerConsumer = messagingProvider.getConsumer(whiskConfig, "scheduler", "scheduler", 128)
+  val schedulerPollDuration: FiniteDuration = 5.second
+  val schedulerUpFeed: ActorRef = actorSystem.actorOf(Props {
+    new MessageFeed(
+      "scheduler",
+      logging,
+      schedulerConsumer,
+      schedulerConsumer.maxPeek,
+      schedulerPollDuration,
+      processSchedulerUpMessage,
+      logHandoff = false)
+  })
+
+  def processSchedulerUpMessage(bytes: Array[Byte]): Future[Unit] = Future {
+    val raw = new String(bytes, StandardCharsets.UTF_8)
+    SchedulerMessage.parse(raw) match {
+      case Success(p: SchedulerMessage) =>
+        invokerPool ! p
+        schedulerUpFeed ! MessageFeed.Processed
+
+      case Failure(t) =>
+        schedulerUpFeed ! MessageFeed.Processed
+        logging.error(this, s"failed processing message: $raw with $t")
+    }
   }
 
   override val invokerPool =

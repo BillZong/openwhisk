@@ -267,6 +267,15 @@ object PingMessage extends DefaultJsonProtocol {
   implicit val serdes = jsonFormat(PingMessage.apply _, "name")
 }
 
+case class SchedulerMessage(instance: SchedulerInstanceId) extends Message {
+  override def serialize: String = SchedulerMessage.serdes.write(this).compactPrint
+}
+
+object SchedulerMessage extends DefaultJsonProtocol {
+  def parse(msg: String) = Try(serdes.read(msg.parseJson))
+  implicit val serdes = jsonFormat(SchedulerMessage.apply _, "name")
+}
+
 trait EventMessageBody extends Message {
   def typeName: String
 }

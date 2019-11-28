@@ -73,6 +73,9 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   private val logsProvider = SpiLoader.get[LogStoreProvider].instance(actorSystem)
   logging.info(this, s"LogStoreProvider: ${logsProvider.getClass}")
 
+  // send instance up message
+  producer.send("scheduler", SchedulerMessage(instance))
+
   // initialize msg consumer
   val msgProvider = SpiLoader.get[MessagingProvider]
   logging.info(this, s"create instance, id: ${instance.asString}")
@@ -158,10 +161,17 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
     lastCountTime = now
 
     // check the average fix out how many nodes should delete
-    val calcValue = usageStores.map(_.usage)
-    val avg = calcValue.sum.toFloat / calcValue.length
-    var ratio = avg / avgResourcePercentage
-    if (ratio > 1.0) {
+    var ratio: Float = 0
+    if (avgResourcePercentage == 0) {
+      ratio = 0
+    } else {
+      val calcValue = usageStores.map(_.usage)
+      val avg = calcValue.sum.toFloat / calcValue.length
+      ratio = avg / avgResourcePercentage
+    }
+    if (ratio == 0) {
+      ratio = Math.abs(currentNodesCount - invokerNodeLimits.min) / currentNodesCount
+    } else if (ratio > 1.0) {
       ratio = 1.0.toFloat // max ratio
     } else if (ratio < 0.2) {
       ratio = 0.2.toFloat // min ratio
