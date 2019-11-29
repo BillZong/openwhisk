@@ -117,14 +117,14 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
             totalMemory = msg.metricValue.toInt // MB
             resourceFeed ! MessageFeed.Processed
           case "OnlineInvokerCount" =>
-            currentNodesCount = msg.metricValue.toInt // 在线的Invoker数量
-            resourceFeed ! MessageFeed.Processed // block the queue
+            currentNodesCount = msg.metricValue.toInt
+            resourceFeed ! MessageFeed.Processed
           case "slotsNotEnough" =>
             ret = handleNotEnoughMessage(msg)
-            resourceFeed ! MessageFeed.Processed // block the queue
+            resourceFeed ! MessageFeed.Processed
           case "slotsTooMuch" =>
             ret = handleTooMuchMessage(msg.metricValue.toInt)
-            resourceFeed ! MessageFeed.Processed // block the queue
+            resourceFeed ! MessageFeed.Processed
         }
         if (ret._1 == 0) Future.successful(()) else Future.failed(throw new Exception(ret._2))
       }
