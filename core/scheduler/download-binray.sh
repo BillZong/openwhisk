@@ -35,7 +35,7 @@ if [ "$result" == "" ]; then
 	PWD="$PWD/scheduler"
 fi
 
-echo "$PWD"
+#echo "$PWD"
 
 KUBE_BIN_PATH=$PWD/scripts/kube-bin
 KUBE_CFG_PATH=$PWD/scripts/kube-config
