@@ -57,7 +57,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
 
   // invoker node count limits
   val invokerNodeLimits = loadConfigOrThrow[InvokerNodeLimitConfig]("whisk.scheduler.invoker-nodes")
-  var currentNodesCount = 0 // TODO: race condition problem
+  var currentNodesCount = 0
 
   // resource draining threshold
   val resourceDrainCfg = loadConfigOrThrow[ResourceDrainThreshold]("whisk.scheduler.resource-drain-threshold")
@@ -66,6 +66,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   private var handlingUnderThreshold = false
   private var lastCountTime = DateTime.now // milliseconds
 
+  // node handler configs
   val nodeJoinerConfig = loadConfigOrThrow[NodeHandlerBinaryConfig]("whisk.scheduler.node-handler-binary.joiner")
   val nodeDeleterConfig = loadConfigOrThrow[NodeHandlerBinaryConfig]("whisk.scheduler.node-handler-binary.deleter")
 
@@ -89,14 +90,14 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   })
 
   // when handling, could not handle more info again.
-  private var nodeHandling: Boolean = false // TODO: might be race condition problem?
+  private var nodeHandling: Boolean = false
 
   // store for history data, in order to count nodes to join/delete
   private var totalMemory = 0
-  private case class SlotStore(msg: Metric, time: DateTime)
-  private case class UsageStore(usage: Int, time: DateTime)
-  private val slotStores: ArrayBuffer[SlotStore] = new ArrayBuffer[SlotStore]
-  private val usageStores: ArrayBuffer[UsageStore] = new ArrayBuffer[UsageStore]
+  private case class ResourceSlot(msg: Metric, time: DateTime)
+  private case class ResourceUsage(usage: Int, time: DateTime)
+  private val resourceSlots: ArrayBuffer[ResourceSlot] = new ArrayBuffer[ResourceSlot]
+  private val resourceUsages: ArrayBuffer[ResourceUsage] = new ArrayBuffer[ResourceUsage]
 
   override def processResourceMessage(bytes: Array[Byte]): Future[Unit] = {
     val raw = new String(bytes, StandardCharsets.UTF_8)
@@ -138,7 +139,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
     if (avgResourcePercentage >= resourceDrainCfg.minPercentage) {
       // once exceed the limit, postpone the deleting process
       lastCountTime = DateTime.now
-      usageStores.clear()
+      resourceUsages.clear()
       return
     }
     if (handlingUnderThreshold) {
@@ -147,7 +148,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
     }
     // under threshold
     val now = DateTime.now
-    usageStores += UsageStore(avgResourcePercentage, now)
+    resourceUsages += ResourceUsage(avgResourcePercentage, now)
     if ((lastCountTime + resourceDrainCfg.duration * 1000).compare(now) > 0) { // within setting limit time
       return
     }
@@ -161,7 +162,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
     if (avgResourcePercentage == 0) {
       ratio = 0
     } else {
-      val calcValue = usageStores.map(_.usage)
+      val calcValue = resourceUsages.map(_.usage)
       val avg = calcValue.sum.toFloat / calcValue.length
       ratio = avg / avgResourcePercentage
     }
@@ -186,7 +187,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
       return (0, "")
     }
 
-    slotStores += SlotStore(msg, DateTime.now)
+    resourceSlots += ResourceSlot(msg, DateTime.now)
 
     val slotsPerNode = totalMemory / currentNodesCount
     val totalNodeMemory = totalMemory
@@ -196,10 +197,10 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
     if (checkCount > 5) {
       checkCount = 5 // max check count
     }
-    if (slotStores.length < checkCount) {
+    if (resourceSlots.length < checkCount) {
       return (0, "")
     }
-    val filterStores = slotStores.filter(_.msg.transid == msg.transid)
+    val filterStores = resourceSlots.filter(_.msg.transid == msg.transid)
     if (filterStores.length < checkCount) {
       logging.debug(this, s"the not enough slot message from the same loadbalancer count less than $checkCount")
       return (0, "")
@@ -250,7 +251,7 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
         exceptionMsg = e.getMessage
         logging.error(this, s"joining ${joinCount} nodes failed with exception: ${e.getMessage}")
     }
-    slotStores.clear() // clear slots info, for handler another message again
+    resourceSlots.clear() // clear slots info, for handler another message again
     nodeHandling = false
 
     (retVal, exceptionMsg)
