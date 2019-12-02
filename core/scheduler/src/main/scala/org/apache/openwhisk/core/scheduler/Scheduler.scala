@@ -51,8 +51,7 @@ object Scheduler {
    */
   def requiredProperties =
     Map(servicePort -> 8080.toString) ++
-      kafkaHosts ++
-      wskApiHost
+      kafkaHosts
 
   def initKamon(instance: SchedulerInstanceId): Unit = {
     // Replace the hostname of the scheduler to the assigned id of the scheduler.
@@ -100,7 +99,6 @@ object Scheduler {
     }
 
     require(args.length >= 1, "scheduler instance required")
-    logger.info(this, s"current args: ${args(0)}")
     val schedulerInstance = SchedulerInstanceId(args(0))
     initKamon(schedulerInstance)
     logger.info(this, s"starting scheduler, the kafka host is: ${config.kafkaHosts}")

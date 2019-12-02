@@ -86,18 +86,6 @@
   loop_control:
     loop_var: inv_item
 
-- name: check, that required databases exist
-  include_tasks: "{{ openwhisk_home }}/ansible/tasks/db/checkDb.yml"
-  vars:
-    dbName: "{{ inv_item }}"
-    dbUser: "{{ db.credentials.scheduler.user }}"
-    dbPass: "{{ db.credentials.scheduler.pass }}"
-  with_items:
-  - "{{ db.whisk.actions }}"
-  - "{{ db.whisk.activations }}"
-  loop_control:
-    loop_var: inv_item
-
 - name: get running scheduler information
   uri: url="http://{{ ansible_host }}:{{ docker.port }}/containers/json?filters={{ '{"name":[ "scheduler" ],"ancestor":[ "scheduler" ]}' | urlencode }}" return_content=yes
   register: schedulerInfo_output
@@ -191,32 +179,12 @@
       "CONFIG_whisk_kafka_common_sslKeystorePassword": "{{ kafka.ssl.keystore.password }}"
       "CONFIG_whisk_userEvents_enabled": "{{ user_events | default(false) | string }}"
       "ZOOKEEPER_HOSTS": "{{ zookeeper_connect_string }}"
-      "CONFIG_whisk_couchdb_protocol": "{{ db.protocol }}"
-      "CONFIG_whisk_couchdb_host": "{{ db.host }}"
-      "CONFIG_whisk_couchdb_port": "{{ db.port }}"
-      "CONFIG_whisk_couchdb_username": "{{ db.credentials.scheduler.user }}"
-      "CONFIG_whisk_couchdb_password": "{{ db.credentials.scheduler.pass }}"
-      "CONFIG_whisk_couchdb_provider": "{{ db.provider }}"
-      "CONFIG_whisk_couchdb_databases_WhiskAuth": "{{ db.whisk.auth }}"
-      "CONFIG_whisk_couchdb_databases_WhiskEntity": "{{ db.whisk.actions }}"
-      "CONFIG_whisk_couchdb_databases_WhiskActivation": "{{ db.whisk.activations }}"
-      "DB_WHISK_ACTIONS": "{{ db.whisk.actions }}"
-      "DB_WHISK_ACTIVATIONS": "{{ db.whisk.activations }}"
-      "DB_WHISK_AUTHS": "{{ db.whisk.auth }}"
-      "CONFIG_whisk_db_subjectsDdoc": "{{ db_whisk_subjects_ddoc | default() }}"
-      "CONFIG_whisk_db_actionsDdoc": "{{ db_whisk_actions_ddoc | default() }}"
-      "CONFIG_whisk_db_activationsDdoc": "{{ db_whisk_activations_ddoc | default() }}"
-      "CONFIG_whisk_db_activationsFilterDdoc": "{{ db_whisk_activations_filter_ddoc | default() }}"
-      "WHISK_API_HOST_PROTO": "{{ whisk_api_host_proto | default('https') }}"
-      "WHISK_API_HOST_PORT": "{{ whisk_api_host_port | default('443') }}"
-      "WHISK_API_HOST_NAME": "{{ whisk_api_host_name | default(groups['edge'] | first) }}"
       "WHISK_LOGS_DIR": "{{ whisk_logs_dir }}"
       "METRICS_KAMON": "{{ metrics.kamon.enabled | default(false) | string }}"
       "METRICS_KAMON_TAGS": "{{ metrics.kamon.tags | default() | string }}"
       "METRICS_LOG": "{{ metrics.log.enabled | default(false) | string }}"
       "CONFIG_kamon_statsd_hostname": "{{ metrics.kamon.host }}"
       "CONFIG_kamon_statsd_port": "{{ metrics.kamon.port }}"
-      "CONFIG_whisk_spi_LogStoreProvider": "{{ userLogs.spi }}"
       "CONFIG_logback_log_level": "{{ scheduler.loglevel }}"
       "CONFIG_whisk_scheduler_protocol": "{{ scheduler.protocol }}"
       "CONFIG_whisk_scheduler_https_keystorePath": "/conf/{{ scheduler.ssl.keystore.name }}"
@@ -243,34 +211,11 @@
   set_fact:
     env: "{{ env | combine(scheduler.extraEnv) }}"
 
-- name: include plugins
-  include_tasks: "{{ inv_item }}.yml"
-  with_items: "{{ scheduler_plugins | default([]) }}"
-  loop_control:
-    loop_var: inv_item
-
-- name: set scheduler volumes
+- name: populate volumes for scheduler
   set_fact:
-    volumes: "/sys/fs/cgroup:/sys/fs/cgroup,\
-      {{ whisk_logs_dir }}/{{ scheduler_name }}:/logs,\
-      {{ scheduler.confdir }}/{{ scheduler_name }}:/conf,\
-      {{ dockerInfo['DockerRootDir'] }}/containers/:/containers,\
-      {{ docker_sock | default('/var/run/docker.sock') }}:/var/run/docker.sock"
-###
-# The root runc directory varies based on the version of docker and runc.
-# When docker>=18.06 uses docker-runc the directory is /run/docker/runtime-runc/moby.
-# While docker-runc itself uses /run/runc for a root user or /run/user/<uid>/runc for a non-root user.
-# Currently, the scheduler is running as a root user so the below configuration works as expected.
-# But when the scheduler needs to run as a non-root user or the version docker needs to be changed,
-# the following configuration should be properly updated as well.
-#
-# Alternatively, we can disable the runc with scheduler.userRunc = false.
-#
-
-- name: define options when deploying scheduler on Ubuntu
-  set_fact:
-    volumes: "{{ volumes|default('') }},/usr/lib/x86_64-linux-gnu/libapparmor.so.1:/usr/lib/x86_64-linux-gnu/libapparmor.so.1"
-  when: ansible_distribution == "Ubuntu"
+    scheduler_volumes:
+      - "{{ whisk_logs_dir }}/{{ scheduler_name }}:/logs"
+      - "{{ scheduler.confdir }}/{{ scheduler_name }}:/conf"
 
 - name: check if coverage collection is enabled
   set_fact:
@@ -279,7 +224,7 @@
 
 - name: ensure scheduler coverage directory is created with permissions
   file:
-    path: "{{ coverage_logs_dir }}/scheduler/{{ inv_item }}"
+    path: "{{ coverage_logs_dir }}/scheduler/{{ item }}"
     state: directory
     mode: 0777
   with_items:
@@ -287,13 +232,15 @@
     - common
   become: "{{ logs.dir.become }}"
   when: coverage_enabled
-  loop_control:
-    loop_var: inv_item
 
 - name: extend scheduler volume for coverage
   set_fact:
-    volumes: "{{ volumes|default('') }},{{ coverage_logs_dir }}/scheduler:/coverage"
+    scheduler_volumes: "{{ scheduler_volumes|default('') }},{{ coverage_logs_dir }}/scheduler:/coverage"
   when: coverage_enabled
+
+- name: include plugins
+  include_tasks: "{{ item }}.yml"
+  with_items: "{{ scheduler_plugins | default([]) }}"
 
 - name: start scheduler
   docker_container:
@@ -307,7 +254,7 @@
     state: started
     recreate: true
     env: "{{ env }}"
-    volumes: "{{ volumes }}"
+    volumes: "{{ scheduler_volumes }}"
     ports: "{{ scheduler_ports_to_expose }}"
     command:
       /bin/sh -c
