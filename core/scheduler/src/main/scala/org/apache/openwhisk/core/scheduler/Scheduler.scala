@@ -167,10 +167,10 @@ class SchedulerTestService(scheduler: SchedulerCore)(implicit val actorSystem: A
                                                      implicit val logging: Logging)
     extends BasicRasService {
   override def routes(implicit transid: TransactionId): Route = {
-    super.routes ~ handleByHand
+    super.routes ~ testRoutes
   }
 
-  private val handleByHand = {
+  private val testRoutes = {
     implicit val executionContext = actorSystem.dispatcher
     (pathPrefix("test") & post) {
       path("buy") {
