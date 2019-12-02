@@ -24,7 +24,6 @@ import akka.http.scaladsl.model.DateTime
 import akka.stream.ActorMaterializer
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.connector._
-import org.apache.openwhisk.core.containerpool.logging.LogStoreProvider
 import org.apache.openwhisk.core.entity.SchedulerInstanceId
 import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.spi.SpiLoader
@@ -69,9 +68,6 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
 
   val nodeJoinerConfig = loadConfigOrThrow[NodeHandlerBinaryConfig]("whisk.scheduler.node-handler-binary.joiner")
   val nodeDeleterConfig = loadConfigOrThrow[NodeHandlerBinaryConfig]("whisk.scheduler.node-handler-binary.deleter")
-
-  private val logsProvider = SpiLoader.get[LogStoreProvider].instance(actorSystem)
-  logging.info(this, s"LogStoreProvider: ${logsProvider.getClass}")
 
   // send instance up message
   producer.send("scheduler", SchedulerMessage(instance))
