@@ -34,13 +34,10 @@ class SchedulerLauncher(docker: StandaloneDockerClient, port: Int)(implicit logg
   case class SchedulerConfig(image: String)
   private val schedulerConfig = loadConfigOrThrow[SchedulerConfig](StandaloneConfigKeys.schedulerConfigKey)
 
-  def runScheduler(wskApiHostName: String, wskApiHostPort: Int, kafkaHosts: String): Future[ServiceContainer] = {
+  def runScheduler(kafkaHosts: String): Future[ServiceContainer] = {
     logging.info(this, s"Starting scheduler at $port")
     val params = Map("-p" -> Set(s"$port:8080"))
-    val env = Map(
-      "WHISK_API_HOST_NAME" -> wskApiHostName,
-      "WHISK_API_HOST_PORT" -> wskApiHostPort.toString,
-      "KAFKA_HOSTS" -> kafkaHosts)
+    val env = Map("KAFKA_HOSTS" -> kafkaHosts)
     val name = containerName("scheduler")
     val args = createRunCmd(name, env, params)
     val f = docker.runDetached(schedulerConfig.image, args, shouldPull = false)

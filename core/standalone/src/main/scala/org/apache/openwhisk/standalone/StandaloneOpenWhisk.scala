@@ -502,7 +502,7 @@ object StandaloneOpenWhisk extends SLF4JLogging {
     val schedulerPort = getPort(conf.schedulerPort.toOption, preferredSchedulerPort)
     val k = new SchedulerLauncher(dockerClient, schedulerPort)
 
-    val f = k.runScheduler(s"${StandaloneDockerSupport.getLocalHostName()}", conf.apiGwPort(), kafkaHosts)
+    val f = k.runScheduler(kafkaHosts)
     val g = f.andThen {
       case Success(_) =>
         logging.info(
