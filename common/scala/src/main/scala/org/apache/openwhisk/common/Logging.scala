@@ -425,26 +425,6 @@ object LoggingMarkers {
       LogMarkerToken(loadbalancer + controllerInstance.asString, s"memory${actionType}Inflight", counter)(
         MeasurementUnit.none)
 
-  // Check invoker resource state from loadbalancer
-  def LOADBALANCER_RESOURCE_TOTAL(controllerInstance: ControllerInstanceId, resType: String = "memory") = {
-    resType match {
-      case "memory" =>
-        if (TransactionId.metricsKamonTags)
-          LogMarkerToken(
-            loadbalancer,
-            "memoryTotal",
-            counter,
-            None,
-            Map("controller_id" -> controllerInstance.asString))(MeasurementUnit.none)
-        else
-          LogMarkerToken(loadbalancer + controllerInstance.asString, "memoryTotal", counter)(MeasurementUnit.none)
-
-      case otherType =>
-        LogMarkerToken(loadbalancer + controllerInstance.asString, s"unsupportedResType${otherType}", counter)(
-          MeasurementUnit.none)
-    }
-  }
-
   // Counter metrics for completion acks in load balancer
   sealed abstract class CompletionAckType(val name: String) { def asString: String = name }
   case object RegularCompletionAck extends CompletionAckType("regular")
