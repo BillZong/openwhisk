@@ -27,14 +27,20 @@ import org.apache.openwhisk.common.Https.HttpsConfig
 import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.WhiskConfig._
-import org.apache.openwhisk.core.connector.{MessageProducer, MessagingProvider, Metric}
+import org.apache.openwhisk.core.connector.{
+  MessageProducer,
+  MessagingProvider,
+  Metric,
+  ResourceMessage,
+  SchedulerMessage
+}
 import org.apache.openwhisk.core.entity.SchedulerInstanceId
 import org.apache.openwhisk.http.{BasicHttpService, BasicRasService}
 import org.apache.openwhisk.spi.{Spi, SpiLoader}
 import org.apache.openwhisk.utils.ExecutionContextFactory
 import pureconfig.loadConfigOrThrow
-
 import java.nio.charset.StandardCharsets
+
 import akka.http.scaladsl.marshallers.sprayjson.SprayJsonSupport._
 import spray.json._
 import DefaultJsonProtocol._
@@ -105,7 +111,9 @@ object Scheduler {
 
     // message provider
     val msgProvider = SpiLoader.get[MessagingProvider]
-    Seq(("scheduler", "scheduler", None), ("resource", "resource", None))
+    Seq(
+      (SchedulerMessage.topicName, SchedulerMessage.topicName, None),
+      (ResourceMessage.topicName, ResourceMessage.topicName, None))
       .foreach {
         case (topic, topicConfigurationKey, maxMessageBytes) =>
           if (msgProvider.ensureTopic(config, topic, topicConfigurationKey, maxMessageBytes).isFailure) {
@@ -168,7 +176,8 @@ class SchedulerTestService(scheduler: SchedulerCore)(implicit val actorSystem: A
       path("buy") {
         complete {
           scheduler
-            .processResourceMessage(Metric("slotsNotEnough", 256).serialize.getBytes(StandardCharsets.UTF_8))
+            .processResourceMessage(
+              Metric(ResourceMessage.metricName.slotsNotEnough, 256).serialize.getBytes(StandardCharsets.UTF_8))
             .map(_ => JsObject("status" -> 0.toJson))
             .recover {
               case e: Exception =>
@@ -178,7 +187,8 @@ class SchedulerTestService(scheduler: SchedulerCore)(implicit val actorSystem: A
       } ~ path("delete") {
         complete {
           scheduler
-            .processResourceMessage(Metric("slotsTooMuch", 1).serialize.getBytes(StandardCharsets.UTF_8))
+            .processResourceMessage(
+              Metric(ResourceMessage.metricName.slotsTooMuch, 1).serialize.getBytes(StandardCharsets.UTF_8))
             .map(_ => JsObject("status" -> 0.toJson))
             .recover {
               case e: Exception =>

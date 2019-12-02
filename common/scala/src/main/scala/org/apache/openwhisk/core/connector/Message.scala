@@ -274,6 +274,19 @@ case class SchedulerMessage(instance: SchedulerInstanceId) extends Message {
 object SchedulerMessage extends DefaultJsonProtocol {
   def parse(msg: String) = Try(serdes.read(msg.parseJson))
   implicit val serdes = jsonFormat(SchedulerMessage.apply _, "name")
+
+  val topicName = "scheduler"
+}
+
+object ResourceMessage {
+  val topicName = "resource"
+  object metricName {
+    val onlineInvokerCount = "onlineInvokerCount"
+    val memoryTotal = "memoryTotal"
+    val memoryUsedPercentage = "memoryUsedPercentage"
+    val slotsTooMuch = "slotsTooMuch"
+    val slotsNotEnough = "slotsNotEnough"
+  }
 }
 
 trait EventMessageBody extends Message {

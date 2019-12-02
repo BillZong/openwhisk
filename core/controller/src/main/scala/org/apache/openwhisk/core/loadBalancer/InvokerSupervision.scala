@@ -161,7 +161,7 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
     // this is only used for the internal test action which enabled an invoker to become healthy again
     case msg: ActivationRequest => sendActivationToInvoker(msg.msg, msg.invoker).pipeTo(sender)
 
-    // this is only used for the scheduler up
+    // this is only used for the scheduler component up
     case _: SchedulerMessage => logStatus()
   }
 
@@ -174,7 +174,7 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
   }
 
   private def publishOnlineInvokerCount() = {
-    val topic = "resource"
+    val topic = ResourceMessage.topicName
 
     val start = transid.started(
       this,
@@ -183,7 +183,7 @@ class InvokerPool(childFactory: (ActorRefFactory, InvokerInstanceId) => ActorRef
       logLevel = InfoLevel)
 
     // Message
-    val msg = Metric("OnlineInvokerCount", status.filter(_.status != Offline).length)
+    val msg = Metric(ResourceMessage.metricName.onlineInvokerCount, status.filter(_.status != Offline).length)
 
     messageProducer.send(topic, msg).andThen {
       case Success(status) =>

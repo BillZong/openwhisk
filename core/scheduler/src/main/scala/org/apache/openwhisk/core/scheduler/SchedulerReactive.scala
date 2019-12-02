@@ -70,12 +70,12 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   val nodeDeleterConfig = loadConfigOrThrow[NodeHandlerBinaryConfig]("whisk.scheduler.node-handler-binary.deleter")
 
   // send instance up message
-  producer.send("scheduler", SchedulerMessage(instance))
+  producer.send(SchedulerMessage.topicName, SchedulerMessage(instance))
 
   // initialize msg consumer
   val msgProvider = SpiLoader.get[MessagingProvider]
   logging.info(this, s"create instance, id: ${instance.asString}")
-  val msgConsumer = msgProvider.getConsumer(config, s"scheduler${instance.asString}", "resource", 4096)
+  val msgConsumer = msgProvider.getConsumer(config, s"scheduler${instance.asString}", ResourceMessage.topicName, 4096)
   val pingPollDuration = 1.second
   val resourceFeed: ActorRef = actorSystem.actorOf(Props {
     new MessageFeed(
@@ -106,19 +106,19 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
         logging.info(this, s"scheduler${instance.asString} got resource msg: ${msg}")
         var ret = (0, "")
         msg.metricName match {
-          case "memoryUsedPercentage" =>
+          case ResourceMessage.metricName.memoryUsedPercentage =>
             handlerMemoryUsageMessage(msg.metricValue.toInt)
             resourceFeed ! MessageFeed.Processed
-          case "memoryTotal" =>
+          case ResourceMessage.metricName.memoryTotal =>
             totalMemory = msg.metricValue.toInt // MB
             resourceFeed ! MessageFeed.Processed
-          case "OnlineInvokerCount" =>
+          case ResourceMessage.metricName.onlineInvokerCount =>
             currentNodesCount = msg.metricValue.toInt
             resourceFeed ! MessageFeed.Processed
-          case "slotsNotEnough" =>
+          case ResourceMessage.metricName.slotsNotEnough =>
             ret = handleNotEnoughMessage(msg)
             resourceFeed ! MessageFeed.Processed
-          case "slotsTooMuch" =>
+          case ResourceMessage.metricName.slotsTooMuch =>
             ret = handleTooMuchMessage(msg.metricValue.toInt)
             resourceFeed ! MessageFeed.Processed
         }
@@ -175,7 +175,8 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
     val deleteNodeCount = Math.ceil(currentNodesCount * (1 - ratio)).toLong
 
     // handle msg
-    processResourceMessage(Metric("slotsTooMuch", deleteNodeCount).serialize.getBytes(StandardCharsets.UTF_8))
+    processResourceMessage(
+      Metric(ResourceMessage.metricName.slotsTooMuch, deleteNodeCount).serialize.getBytes(StandardCharsets.UTF_8))
     handlingUnderThreshold = false
   }
 

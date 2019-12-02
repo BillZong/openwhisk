@@ -235,7 +235,9 @@ class ShardingContainerPoolBalancer(
     override def receive: Receive = {
       case CurrentInvokerPoolState(newState) =>
         schedulingState.updateInvokers(newState)
-        schedulerProducer.send("resource", Metric("memoryTotal", schedulingState.totalSlotCount))
+        schedulerProducer.send(
+          ResourceMessage.topicName,
+          Metric(ResourceMessage.metricName.memoryTotal, schedulingState.totalSlotCount))
 
       // State of the cluster as it is right now
       case CurrentClusterState(members, _, _, _, _) =>
@@ -267,9 +269,9 @@ class ShardingContainerPoolBalancer(
     private def updateInvokerMemoryUsage() = {
       val totalInvokerMemory = schedulingState.totalSlotCount
       val totalUsedMemory = totalBlackBoxActivationMemory.longValue + totalManagedActivationMemory.longValue
-      val msg = Metric("memoryUsedPercentage", totalUsedMemory * 100 / totalInvokerMemory)
+      val msg = Metric(ResourceMessage.metricName.memoryUsedPercentage, totalUsedMemory * 100 / totalInvokerMemory)
       logging.info(this, s"send memoryUsedPercentage msg: $msg")
-      schedulerProducer.send("resource", msg)
+      schedulerProducer.send(ResourceMessage.topicName, msg)
     }
   }))
 
@@ -343,7 +345,8 @@ class ShardingContainerPoolBalancer(
   }
 
   /** Receive Ping messages from invokers. */
-  val schedulerConsumer = messagingProvider.getConsumer(whiskConfig, "scheduler", "scheduler", 128)
+  val schedulerConsumer =
+    messagingProvider.getConsumer(whiskConfig, SchedulerMessage.topicName, SchedulerMessage.topicName, 128)
   val schedulerPollDuration: FiniteDuration = 5.second
   val schedulerUpFeed: ActorRef = actorSystem.actorOf(Props {
     new MessageFeed(
@@ -472,8 +475,8 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
         // If we've gone through all invokers
         if (stepsDone == numInvokers + 1) {
           // report the dilemma.
-          val dilemma = Metric("slotsNotEnough", slots.toLong)
-          messagingProvider.getProducer(whiskConfig).send("resource", dilemma)
+          val dilemma = Metric(ResourceMessage.metricName.slotsNotEnough, slots.toLong)
+          messagingProvider.getProducer(whiskConfig).send(ResourceMessage.topicName, dilemma)
 
           val healthyInvokers = invokers.filter(_.status.isUsable)
           if (healthyInvokers.nonEmpty) {
