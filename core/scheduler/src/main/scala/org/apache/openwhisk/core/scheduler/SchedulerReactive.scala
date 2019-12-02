@@ -136,6 +136,10 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   private def handlerMemoryUsageMessage(percent: Int): Unit = {
     avgResourcePercentage = percent
 
+    if (currentNodesCount == 0 || totalMemory == 0) {
+      logging.info(this, "no nodes in invoker cluster yet")
+      return
+    }
     if (avgResourcePercentage >= resourceDrainCfg.minPercentage) {
       // once exceed the limit, postpone the deleting process
       lastCountTime = DateTime.now
@@ -160,15 +164,13 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
     // check the average fix out how many nodes should delete
     var ratio: Float = 0
     if (avgResourcePercentage == 0) {
-      ratio = 0
+      ratio = Math.abs(currentNodesCount - invokerNodeLimits.min) / currentNodesCount
     } else {
       val calcValue = resourceUsages.map(_.usage)
       val avg = calcValue.sum.toFloat / calcValue.length
       ratio = avg / avgResourcePercentage
     }
-    if (ratio == 0) {
-      ratio = Math.abs(currentNodesCount - invokerNodeLimits.min) / currentNodesCount
-    } else if (ratio > 1.0) {
+    if (ratio > 1.0) {
       ratio = 1.0.toFloat // max ratio
     } else if (ratio < 0.2) {
       ratio = 0.2.toFloat // min ratio
@@ -182,6 +184,11 @@ class SchedulerReactive(config: WhiskConfig, instance: SchedulerInstanceId, prod
   }
 
   private def handleNotEnoughMessage(msg: Metric): (Int, String) = {
+    if (currentNodesCount == 0) {
+      // NOTE: would not handler no invoker case
+      logging.info(this, "no nodes in invoker cluster yet")
+      return (0, "")
+    }
     if (nodeHandling) {
       logging.info(this, s"handling nodes now, could not handle more of it.")
       return (0, "")
