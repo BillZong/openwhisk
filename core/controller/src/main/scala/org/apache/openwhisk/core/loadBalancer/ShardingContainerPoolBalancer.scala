@@ -266,8 +266,12 @@ class ShardingContainerPoolBalancer(
     }
 
     private val schedulerProducer = messagingProvider.getProducer(config)
-    private def updateInvokerMemoryUsage() = {
+    private def updateInvokerMemoryUsage(): Unit = {
       val totalInvokerMemory = schedulingState.totalSlotCount
+      if (totalInvokerMemory == 0) {
+        // the memory calculation not ready yet
+        return
+      }
       val totalUsedMemory = totalBlackBoxActivationMemory.longValue + totalManagedActivationMemory.longValue
       val msg = Metric(ResourceMessage.metricName.memoryUsedPercentage, totalUsedMemory * 100 / totalInvokerMemory)
       logging.info(this, s"send memoryUsedPercentage msg: $msg")
@@ -344,7 +348,7 @@ class ShardingContainerPoolBalancer(
       }
   }
 
-  /** Receive Ping messages from invokers. */
+  /** Receive Scheduler up messages. */
   val schedulerConsumer =
     messagingProvider.getConsumer(whiskConfig, SchedulerMessage.topicName, SchedulerMessage.topicName, 128)
   val schedulerPollDuration: FiniteDuration = 5.second
