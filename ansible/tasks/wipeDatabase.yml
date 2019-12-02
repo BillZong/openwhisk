@@ -30,10 +30,8 @@
     readers:
     - "{{ db.credentials.controller.user }}"
     - "{{ db.credentials.invoker.user }}"
-    - "{{ db.credentials.scheduler.user }}"
     writers:
     - "{{ db.credentials.controller.user }}"
-    - "{{ db.credentials.scheduler.user }}"
 
 - include_tasks: db/recreateDb.yml
   vars:
@@ -45,11 +43,9 @@
     readers:
     - "{{ db.credentials.controller.user }}"
     - "{{ db.credentials.invoker.user }}"
-    - "{{ db.credentials.scheduler.user }}"
     writers:
     - "{{ db.credentials.controller.user }}"
     - "{{ db.credentials.invoker.user }}"
-    - "{{ db.credentials.scheduler.user }}"
 
 - include_tasks: recreateViews.yml
   when: withViews == True
