@@ -22,7 +22,7 @@ timeout(time: 12, unit: 'HOURS') {
     def cert = "domain.crt"
     def key = "domain.key"
 
-    node("openwhisk") {
+    node("slave-245") {
         def hostName = sh(returnStdout: true, script: 'hostname').trim()
         def domainName = hostName+".apache.org"
         def home = sh(returnStdout: true, script: 'echo $HOME').trim()
@@ -33,7 +33,7 @@ timeout(time: 12, unit: 'HOURS') {
             sh "mkdir -p ${jobSpace}"
             dir("${jobSpace}") {
                 try {
-                    deleteDir()
+                    //deleteDir()
                     stage('Checkout') {
                         checkout scm
                     }
@@ -46,83 +46,86 @@ timeout(time: 12, unit: 'HOURS') {
                             println("Unable to stop and remove the container registry.")
                         }
 
-                        sh "docker run -d --restart=always --name registry -v \"$HOME\"/certs:/certs \
-                                -e REGISTRY_HTTP_ADDR=0.0.0.0:${port} -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/${cert} \
-                                -e REGISTRY_HTTP_TLS_KEY=/certs/${key} -p ${port}:${port} registry:2"
+                        //sh "docker run -d --restart=always --name registry -v \"$HOME\"/certs:/certs \
+                        //        -e REGISTRY_HTTP_ADDR=0.0.0.0:${port} -e REGISTRY_HTTP_TLS_CERTIFICATE=/certs/${cert} \
+                        //        -e REGISTRY_HTTP_TLS_KEY=/certs/${key} -p ${port}:${port} registry:2"
+                        sh "docker run -d --restart=always --name registry \
+                                -e REGISTRY_HTTP_ADDR=0.0.0.0:${port} \
+                                -p ${port}:${port} registry:2"
                         // Build the controller and invoker images.
                         sh "./gradlew distDocker -PdockerRegistry=${domainName}:${port}"
                         //Install the various modules like standalone
                         sh "./gradlew install"
                     }
 
-                    stage('Deploy Lean') {
-                        dir("ansible") {
-                            // Copy the jenkins ansible configuration under the directory ansible. This can make sure the SSH is used to
-                            // access the VMs of invokers by the VM of the controller.
-                            sh '[ -f "environments/jenkins/ansible_jenkins.cfg" ] && cp environments/jenkins/ansible_jenkins.cfg ansible.cfg'
-                        }
+                    //stage('Deploy Lean') {
+                    //    dir("ansible") {
+                    //        // Copy the jenkins ansible configuration under the directory ansible. This can make sure the SSH is used to
+                    //        // access the VMs of invokers by the VM of the controller.
+                    //        sh '[ -f "environments/jenkins/ansible_jenkins.cfg" ] && cp environments/jenkins/ansible_jenkins.cfg ansible.cfg'
+                    //    }
 
-                        dir("ansible/environments/jenkins") {
-                            sh "cp ${hostName}.j2.ini hosts.j2.ini"
-                        }
+                    //    dir("ansible/environments/jenkins") {
+                    //        sh "cp ${hostName}.j2.ini hosts.j2.ini"
+                    //    }
 
-                        dir("ansible/environments/jenkins/group_vars") {
-                            sh "cp ${hostName} all"
-                        }
+                    //    dir("ansible/environments/jenkins/group_vars") {
+                    //        sh "cp ${hostName} all"
+                    //    }
 
-                        dir("ansible") {
-                            sh 'ansible-playbook -i environments/jenkins setup.yml'
-                            sh 'ansible-playbook -i environments/jenkins openwhisk.yml -e mode=clean'
-                            sh 'ansible-playbook -i environments/jenkins apigateway.yml -e mode=clean'
-                            sh 'ansible-playbook -i environments/jenkins couchdb.yml -e mode=clean'
-                            sh 'ansible-playbook -i environments/jenkins couchdb.yml'
-                            sh 'ansible-playbook -i environments/jenkins initdb.yml'
-                            sh 'ansible-playbook -i environments/jenkins wipe.yml'
-                            sh 'ansible-playbook -i environments/jenkins apigateway.yml'
-                            sh 'ansible-playbook -i environments/jenkins openwhisk.yml -e lean=true'
-                            sh 'ansible-playbook -i environments/jenkins properties.yml'
-                            sh 'ansible-playbook -i environments/jenkins routemgmt.yml'
-                            sh 'ansible-playbook -i environments/jenkins postdeploy.yml'
-                        }
-                    }
+                    //    dir("ansible") {
+                    //        sh 'ansible-playbook -i environments/jenkins setup.yml'
+                    //        sh 'ansible-playbook -i environments/jenkins openwhisk.yml -e mode=clean'
+                    //        sh 'ansible-playbook -i environments/jenkins apigateway.yml -e mode=clean'
+                    //        sh 'ansible-playbook -i environments/jenkins couchdb.yml -e mode=clean'
+                    //        sh 'ansible-playbook -i environments/jenkins couchdb.yml'
+                    //        sh 'ansible-playbook -i environments/jenkins initdb.yml'
+                    //        sh 'ansible-playbook -i environments/jenkins wipe.yml'
+                    //        sh 'ansible-playbook -i environments/jenkins apigateway.yml'
+                    //        sh 'ansible-playbook -i environments/jenkins openwhisk.yml -e lean=true'
+                    //        sh 'ansible-playbook -i environments/jenkins properties.yml'
+                    //        sh 'ansible-playbook -i environments/jenkins routemgmt.yml'
+                    //        sh 'ansible-playbook -i environments/jenkins postdeploy.yml'
+                    //    }
+                    //}
 
-                    try {
-                        stage('Test Lean Openwhisk') {
-                            sh './gradlew :tests:test --tests system.basic.WskRestBasicTests -DtestResultsDirName=test-lean-openwhisk'
-                        }
-                    } catch (exp) {
-                        println("Exception: " + exp)
-                        error(exp)
-                    }
+                    //try {
+                    //    stage('Test Lean Openwhisk') {
+                    //        sh './gradlew :tests:test --tests system.basic.WskRestBasicTests -DtestResultsDirName=test-lean-openwhisk'
+                    //    }
+                    //} catch (exp) {
+                    //    println("Exception: " + exp)
+                    //    error(exp)
+                    //}
 
-                    stage('Deploy full Openwhisk') {
-                        dir("ansible") {
-                            sh 'ansible-playbook -i environments/jenkins openwhisk.yml -e mode=clean'
-                            sh 'ansible-playbook -i environments/jenkins openwhisk.yml'
-                        }
-                    }
+                    //stage('Deploy full Openwhisk') {
+                    //    dir("ansible") {
+                    //        sh 'ansible-playbook -i environments/jenkins openwhisk.yml -e mode=clean'
+                    //        sh 'ansible-playbook -i environments/jenkins openwhisk.yml'
+                    //    }
+                    //}
 
-                    try {
-                        stage('Test') {
-                            sh './gradlew :tests:test -DtestResultsDirName=test-openwhisk'
-                        }
-                    } catch (exp) {
-                        println("Exception:" + exp)
-                    }
+                    //try {
+                    //    stage('Test') {
+                    //        sh './gradlew :tests:test -DtestResultsDirName=test-openwhisk'
+                    //    }
+                    //} catch (exp) {
+                    //    println("Exception:" + exp)
+                    //}
 
-                    try {
-                        stage('Shoot one invoker test') {
-                            def folder = "ansible/environments/jenkins/group_vars"
-                            def invoker1_node = sh(returnStdout: true,
-                                    script: "grep invoker1_machine ${folder}/${hostName} | cut -d: -f2").trim()
-                            sh "ssh -i ${home}/secret/openwhisk_key openwhisk@${invoker1_node} 'docker stop invoker1'"
-                            sleep time: 1, unit: 'MINUTES'
-                            sh './gradlew :tests:testShootInvoker -DtestResultsDirName=test-shoot-invoker'
-                            sh "ssh -i ${home}/secret/openwhisk_key openwhisk@${invoker1_node} 'docker start invoker1'"
-                        }
-                    } catch (exp) {
-                        println("Exception:" + exp)
-                    }
+                    //try {
+                    //    stage('Shoot one invoker test') {
+                    //        def folder = "ansible/environments/jenkins/group_vars"
+                    //        def invoker1_node = sh(returnStdout: true,
+                    //                script: "grep invoker1_machine ${folder}/${hostName} | cut -d: -f2").trim()
+                    //        sh "ssh -i ${home}/secret/openwhisk_key openwhisk@${invoker1_node} 'docker stop invoker1'"
+                    //        sleep time: 1, unit: 'MINUTES'
+                    //        sh './gradlew :tests:testShootInvoker -DtestResultsDirName=test-shoot-invoker'
+                    //        sh "ssh -i ${home}/secret/openwhisk_key openwhisk@${invoker1_node} 'docker start invoker1'"
+                    //    }
+                    //} catch (exp) {
+                    //    println("Exception:" + exp)
+                    //}
 
                 } catch (exp) {
                     println("Exception:" + exp)
