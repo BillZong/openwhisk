@@ -23,7 +23,7 @@ import scala.util.Try
 
 import spray.json._
 import org.apache.openwhisk.core.ConfigKeys
-import pureconfig._
+import pureconfig.loadConfigOrThrow
 
 case class InvokerNodeLimitConfig(min: Int, max: Int)
 
