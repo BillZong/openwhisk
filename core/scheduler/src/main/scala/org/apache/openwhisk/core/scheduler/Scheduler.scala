@@ -27,7 +27,7 @@ import org.apache.openwhisk.common._
 import org.apache.openwhisk.core.WhiskConfig
 import org.apache.openwhisk.core.WhiskConfig._
 import org.apache.openwhisk.core.connector.{MessageProducer, MessagingProvider}
-import org.apache.openwhisk.core.entity.{ActivationEntityLimit, SchedulerInstanceId}
+import org.apache.openwhisk.core.entity.SchedulerInstanceId
 import org.apache.openwhisk.http.{BasicHttpService, BasicRasService}
 import org.apache.openwhisk.spi.{Spi, SpiLoader}
 import org.apache.openwhisk.utils.ExecutionContextFactory
@@ -46,7 +46,6 @@ object Scheduler {
   def requiredProperties =
     Map(servicePort -> 8080.toString) ++
       kafkaHosts ++
-      zookeeperHosts ++
       wskApiHost
 
   def initKamon(instance: SchedulerInstanceId): Unit = {
@@ -57,12 +56,23 @@ object Scheduler {
   }
 
   def main(args: Array[String]): Unit = {
-    ConfigMXBean.register()
-    Kamon.loadReportersFromConfig()
+    try {
+      ConfigMXBean.register()
+    } catch {
+      case _: Exception => None // might be registered by other process.
+    }
+
     implicit val ec = ExecutionContextFactory.makeCachedThreadPoolExecutionContext()
     implicit val actorSystem: ActorSystem =
       ActorSystem(name = "scheduler-actor-system", defaultExecutionContext = Some(ec))
     implicit val logger = new AkkaLogging(akka.event.Logging.getLogger(actorSystem, this))
+
+    start(args)
+  }
+
+  def start(args: Array[String])(implicit ec: ExecutionContext, actorSystem: ActorSystem, logger: Logging): Unit = {
+    Kamon.loadReportersFromConfig()
+
     // TODO: needed?
 //    val poolConfig: ContainerPoolConfig = loadConfigOrThrow[ContainerPoolConfig](ConfigKeys.containerPool)
 //    val limitConfig: ConcurrencyLimitConfig = loadConfigOrThrow[ConcurrencyLimitConfig](ConfigKeys.concurrencyLimit)
@@ -88,24 +98,23 @@ object Scheduler {
     }
 
     require(args.length >= 1, "scheduler instance required")
+    logger.info(this, s"current args: ${args}")
     val schedulerInstance = SchedulerInstanceId(args(0))
     initKamon(schedulerInstance)
-
-    val topicBaseName = "scheduler"
-    val topicName = topicBaseName + schedulerInstance.asString
-
-    val maxMessageBytes = Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT)
+    logger.info(this, s"starting scheduler, the kafka host is: ${config.kafkaHosts}")
 
     // message provider
     val msgProvider = SpiLoader.get[MessagingProvider]
-    if (msgProvider
-          .ensureTopic(config, topic = topicName, topicConfig = topicBaseName, maxMessageBytes = maxMessageBytes)
-          .isFailure) {
-      abort(s"failure during msgProvider.ensureTopic for topic $topicName")
-    }
+    Seq(("scheduler", "scheduler", None), ("resource", "resource", None))
+      .foreach {
+        case (topic, topicConfigurationKey, maxMessageBytes) =>
+          if (msgProvider.ensureTopic(config, topic, topicConfigurationKey, maxMessageBytes).isFailure) {
+            abort(s"failure during msgProvider.ensureTopic for topic $topic")
+          }
+      }
 
     //TODO: need implementation
-    val producer = msgProvider.getProducer(config, Some(ActivationEntityLimit.MAX_ACTIVATION_LIMIT))
+    val producer = msgProvider.getProducer(config)
     val scheduler = try {
       SpiLoader.get[SchedulerProvider].instance(config, schedulerInstance, producer)
     } catch {

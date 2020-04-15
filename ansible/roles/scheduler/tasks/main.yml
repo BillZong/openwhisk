@@ -15,22 +15,12 @@
 # limitations under the License.
 #
 ---
-# This playbook deploys an Openwhisk stack.
-# It assumes you have already set up your database with the respective db provider
-# playbook (currently cloudant.yml or couchdb.yml).
-# It assumes that wipe.yml have being deployed at least once.
+# This role will install invoker in group 'scheduler' in the environment inventory
+# In deploy mode it will deploy scheduler.
+# In clean mode it will remove the invoker containers.
 
+- import_tasks: deploy.yml
+  when: mode == "deploy"
 
-- import_playbook: kafka.yml
-  when: not lean
-
-- import_playbook: controller.yml
-
-- import_playbook: invoker.yml
-  when: not lean
-
-- import_playbook: edge.yml
-
-- import_playbook: downloadcli.yml
-
-- import_playbook: scheduler.yml
+- import_tasks: clean.yml
+  when: mode == "clean"
