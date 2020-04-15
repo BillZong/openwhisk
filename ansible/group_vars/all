@@ -49,7 +49,7 @@ whisk:
   version:
     date: "{{ansible_date_time.iso8601}}"
   feature_flags:
-    require_api_key_annotation: "{{ require_api_key_annotation | default(true) }}"
+    require_api_key_annotation: "{{ require_api_key_annotation | default(true) | lower  }}"
 
 ##
 # configuration parameters related to support runtimes (see org.apache.openwhisk.core.entity.ExecManifest for schema of the manifest).
@@ -125,6 +125,8 @@ jmx:
   rmiBasePortController: 16000
   basePortInvoker: 17000
   rmiBasePortInvoker: 18000
+  basePortScheduler: 19000
+  rmiBasePortScheduler: 20000
   user: "{{ jmxuser | default('jmxuser') }}"
   pass: "{{ jmxuser | default('jmxpass') }}"
   jvmCommonArgs: "-Dcom.sun.management.jmxremote -Dcom.sun.management.jmxremote.ssl=false -Dcom.sun.management.jmxremote.local.only=false -Dcom.sun.management.jmxremote.authenticate=true -Dcom.sun.management.jmxremote.password.file=/home/owuser/jmxremote.password -Dcom.sun.management.jmxremote.access.file=/home/owuser/jmxremote.access"
@@ -218,6 +220,51 @@ invoker:
       password: "{{ invoker_keystore_password | default('openwhisk') }}"
       name: "{{ __invoker_ssl_keyPrefix }}openwhisk-keystore.p12"
 
+# Moved here to avoid recursions. Please do not use outside of scheduler-dict.
+__scheduler_ssl_keyPrefix: "scheduler-"
+
+scheduler:
+  dir:
+    become: "{{ scheduler_dir_become | default(false) }}"
+  confdir: "{{ config_root_dir }}/scheduler"
+  port: 14001
+  heap: "{{ scheduler_heap | default('2g') }}"
+  arguments: "{{ scheduler_arguments | default('') }}"
+  # only 1 scheduler on a single machine.
+  allowMultipleInstances: "false"
+  docker:
+    become: "{{ scheduler_docker_become | default(false) }}"
+  loglevel: "{{ scheduler_loglevel | default(whisk_loglevel) | default('INFO') }}"
+  #jmxremote:
+    #jvmArgs: "{% if inventory_hostname in groups['schedulers'] %}
+    #{{ jmx.jvmCommonArgs }} -Djava.rmi.server.hostname={{ schedulerHostname }} -Dcom.sun.management.jmxremote.rmi.port={{ jmx.rmiBasePortInvoker + groups['schedulers'].index(inventory_hostname) }} -Dcom.sun.management.jmxremote.port={{ jmx.basePortInvoker + groups['schedulers'].index(inventory_hostname) }}
+    #{% endif %}"
+  extraEnv: "{{ scheduler_extraEnv | default({}) }}"
+  protocol: "{{ scheduler_protocol | default('https') }}"
+  ssl:
+    cn: "openwhisk-schedulers"
+    keyPrefix: "{{ __scheduler_ssl_keyPrefix }}"
+    storeFlavor: "PKCS12"
+    clientAuth: "{{ scheduler_client_auth | default('true') }}"
+    cert: "{{ __scheduler_ssl_keyPrefix }}openwhisk-server-cert.pem"
+    key: "{{ __scheduler_ssl_keyPrefix }}openwhisk-server-key.pem"
+    keystore:
+      password: "{{ scheduler_keystore_password | default('openwhisk') }}"
+      name: "{{ __scheduler_ssl_keyPrefix }}openwhisk-keystore.p12"
+  nodes:
+    max: "{{ scheduler_nodes_max | default(10) }}"
+    min: "{{ scheduler_nodes_min | default(1) }}"
+  drain:
+    percentage: "{{ scheduler_drain_percentage | default(10) }}"
+    duration: "{{ scheduler_drain_duration | default(60) }}"
+  nodeHandler:
+    joiner:
+      bin: "{{ scheduler_nodeHandler_joiner_bin | default('/root/node-handler/node-joiner')  }}"
+      cfg: "{{ scheduler_nodeHandler_joiner_cfg | default('/root/node-handler/node-joiner-configs.yaml')  }}"
+    deleter:
+      bin: "{{ scheduler_nodeHandler_deleter_bin | default('/root/node-handler/node-deleter')  }}"
+      cfg: "{{ scheduler_nodeHandler_deleter_cfg | default('/root/node-handler/node-deleter-configs.yaml')  }}"
+
 userLogs:
   spi: "{{ userLogs_spi | default('org.apache.openwhisk.core.containerpool.logging.DockerToActivationLogStoreProvider') }}"
 
@@ -272,6 +319,9 @@ db:
     invoker:
       user: "{{ db_invoker_user | default(lookup('ini', 'db_username section=invoker file={{ playbook_dir }}/db_local.ini')) }}"
       pass: "{{ db_invoker_pass | default(lookup('ini', 'db_password section=invoker file={{ playbook_dir }}/db_local.ini')) }}"
+    scheduler:
+      user: "{{ db_scheduler_user | default(lookup('ini', 'db_username section=scheduler file={{ playbook_dir }}/db_local.ini')) }}"
+      pass: "{{ db_scheduler_pass | default(lookup('ini', 'db_password section=scheduler file={{ playbook_dir }}/db_local.ini')) }}"
   activation_store:
     backend: "{{ db_activation_backend | default('CouchDB') }}"
   elasticsearch:
@@ -419,4 +469,4 @@ metrics:
     host: "{{ metrics_kamon_statsd_host | default('') }}"
     port: "{{ metrics_kamon_statsd_port | default('8125') }}"
 
-user_events: "{{ user_events_enabled | default(false) }}"
+user_events: "{{ user_events_enabled | default(false) | lower }}"

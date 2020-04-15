@@ -1,0 +1,5 @@
+*
+!init.sh
+!scripts
+!build/distributions
+!build/tmp/docker-coverage

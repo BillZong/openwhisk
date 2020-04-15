@@ -17,11 +17,13 @@
 
 package org.apache.openwhisk.core.loadBalancer
 
+import java.nio.charset.StandardCharsets
+
 import akka.actor.ActorRef
 import akka.actor.ActorRefFactory
 import java.util.concurrent.ThreadLocalRandom
 
-import akka.actor.{Actor, ActorSystem, Cancellable, Props}
+import akka.actor.{Actor, ActorSystem, Cancellable, Props, Timers}
 import akka.cluster.ClusterEvent._
 import akka.cluster.{Cluster, Member, MemberStatus}
 import akka.management.scaladsl.AkkaManagement
@@ -42,7 +44,8 @@ import org.apache.openwhisk.spi.SpiLoader
 
 import scala.annotation.tailrec
 import scala.concurrent.Future
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
+import scala.util.{Failure, Success}
 
 /**
  * A loadbalancer that schedules workload based on a hashing-algorithm.
@@ -168,6 +171,7 @@ class ShardingContainerPoolBalancer(
 
   override protected def emitMetrics() = {
     super.emitMetrics()
+
     MetricEmitter.emitGaugeMetric(
       INVOKER_TOTALMEM_BLACKBOX,
       schedulingState.blackboxInvokers.foldLeft(0L) { (total, curr) =>
@@ -214,7 +218,7 @@ class ShardingContainerPoolBalancer(
    * [[ShardingContainerPoolBalancerState.updateInvokers]] and [[ShardingContainerPoolBalancerState.updateCluster]]
    * are called exclusive of each other and not concurrently.
    */
-  private val monitor = actorSystem.actorOf(Props(new Actor {
+  private val monitor = actorSystem.actorOf(Props(new Actor with Timers {
     override def preStart(): Unit = {
       cluster.foreach(_.subscribe(self, classOf[MemberEvent], classOf[ReachabilityEvent]))
     }
@@ -222,9 +226,18 @@ class ShardingContainerPoolBalancer(
     // all members of the cluster that are available
     var availableMembers = Set.empty[Member]
 
+    // Timer to report status
+    private case object UploadResourceKey
+    private case object UploadResourceFirstTick
+    private case object UploadResourceTick
+    timers.startSingleTimer(UploadResourceKey, UploadResourceFirstTick, 10.seconds)
+
     override def receive: Receive = {
       case CurrentInvokerPoolState(newState) =>
         schedulingState.updateInvokers(newState)
+        schedulerProducer.send(
+          ResourceMessage.topicName,
+          Metric(ResourceMessage.metricName.memoryTotal, schedulingState.totalSlotCount))
 
       // State of the cluster as it is right now
       case CurrentClusterState(members, _, _, _, _) =>
@@ -246,12 +259,31 @@ class ShardingContainerPoolBalancer(
         }
 
         schedulingState.updateCluster(availableMembers.size)
+      case UploadResourceFirstTick =>
+        timers.startPeriodicTimer(UploadResourceKey, UploadResourceTick, 10.seconds)
+      case UploadResourceTick =>
+        updateInvokerMemoryUsage()
+    }
+
+    private val schedulerProducer = messagingProvider.getProducer(config)
+    private def updateInvokerMemoryUsage(): Unit = {
+      val totalInvokerMemory = schedulingState.totalSlotCount
+      if (totalInvokerMemory == 0) {
+        // the memory calculation not ready yet
+        return
+      }
+      val totalUsedMemory = totalBlackBoxActivationMemory.longValue + totalManagedActivationMemory.longValue
+      val msg = Metric(ResourceMessage.metricName.memoryUsedPercentage, totalUsedMemory * 100 / totalInvokerMemory)
+      logging.info(this, s"send memoryUsedPercentage msg: $msg")
+      schedulerProducer.send(ResourceMessage.topicName, msg)
     }
   }))
 
   /** Loadbalancer interface methods */
   override def invokerHealth(): Future[IndexedSeq[InvokerHealth]] = Future.successful(schedulingState.invokers)
   override def clusterSize: Int = schedulingState.clusterSize
+
+  implicit val whiskConfig = config
 
   /** 1. Publish a message to the loadbalancer */
   override def publish(action: ExecutableWhiskActionMetaData, msg: ActivationMessage)(
@@ -314,6 +346,34 @@ class ShardingContainerPoolBalancer(
           s"failed to schedule activation ${msg.activationId}, action '${msg.action.asString}' ($actionType), ns '${msg.user.namespace.name.asString}' - invokers to use: $invokerStates")
         Future.failed(LoadBalancerException("No invokers available"))
       }
+  }
+
+  /** Receive Scheduler up messages. */
+  val schedulerConsumer =
+    messagingProvider.getConsumer(whiskConfig, SchedulerMessage.topicName, SchedulerMessage.topicName, 128)
+  val schedulerPollDuration: FiniteDuration = 5.second
+  val schedulerUpFeed: ActorRef = actorSystem.actorOf(Props {
+    new MessageFeed(
+      "scheduler",
+      logging,
+      schedulerConsumer,
+      schedulerConsumer.maxPeek,
+      schedulerPollDuration,
+      processSchedulerUpMessage,
+      logHandoff = false)
+  })
+
+  def processSchedulerUpMessage(bytes: Array[Byte]): Future[Unit] = Future {
+    val raw = new String(bytes, StandardCharsets.UTF_8)
+    SchedulerMessage.parse(raw) match {
+      case Success(p: SchedulerMessage) =>
+        invokerPool ! p
+        schedulerUpFeed ! MessageFeed.Processed
+
+      case Failure(t) =>
+        schedulerUpFeed ! MessageFeed.Processed
+        logging.error(this, s"failed processing message: $raw with $t")
+    }
   }
 
   override val invokerPool =
@@ -396,15 +456,18 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
    * @return an invoker to schedule to or None of no invoker is available
    */
   @tailrec
-  def schedule(
-    maxConcurrent: Int,
-    fqn: FullyQualifiedEntityName,
-    invokers: IndexedSeq[InvokerHealth],
-    dispatched: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]],
-    slots: Int,
-    index: Int,
-    step: Int,
-    stepsDone: Int = 0)(implicit logging: Logging, transId: TransactionId): Option[(InvokerInstanceId, Boolean)] = {
+  def schedule(maxConcurrent: Int,
+               fqn: FullyQualifiedEntityName,
+               invokers: IndexedSeq[InvokerHealth],
+               dispatched: IndexedSeq[NestedSemaphore[FullyQualifiedEntityName]],
+               slots: Int,
+               index: Int,
+               step: Int,
+               stepsDone: Int = 0)(implicit logging: Logging,
+                                   transId: TransactionId,
+                                   actorSystem: ActorSystem,
+                                   messagingProvider: MessagingProvider,
+                                   whiskConfig: WhiskConfig): Option[(InvokerInstanceId, Boolean)] = {
     val numInvokers = invokers.size
 
     if (numInvokers > 0) {
@@ -415,6 +478,10 @@ object ShardingContainerPoolBalancer extends LoadBalancerProvider {
       } else {
         // If we've gone through all invokers
         if (stepsDone == numInvokers + 1) {
+          // report the dilemma.
+          val dilemma = Metric(ResourceMessage.metricName.slotsNotEnough, slots.toLong)
+          messagingProvider.getProducer(whiskConfig).send(ResourceMessage.topicName, dilemma)
+
           val healthyInvokers = invokers.filter(_.status.isUsable)
           if (healthyInvokers.nonEmpty) {
             // Choose a healthy invoker randomly
@@ -471,6 +538,7 @@ case class ShardingContainerPoolBalancerState(
 
   /** Getters for the variables, setting from the outside is only allowed through the update methods below */
   def invokers: IndexedSeq[InvokerHealth] = _invokers
+  def totalSlotCount: Long = _invokers.foldLeft(0L)((total, invoker) => total + invoker.id.userMemory.toMB)
   def managedInvokers: IndexedSeq[InvokerHealth] = _managedInvokers
   def blackboxInvokers: IndexedSeq[InvokerHealth] = _blackboxInvokers
   def managedStepSizes: Seq[Int] = _managedStepSizes

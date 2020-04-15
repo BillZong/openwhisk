@@ -27,6 +27,7 @@ import akka.event.Logging.ErrorLevel
 import akka.event.Logging.InfoLevel
 import akka.http.scaladsl.model.Uri
 import akka.http.scaladsl.model.Uri.{Path, Query}
+import akka.pattern.after
 import akka.stream.scaladsl.Source
 import akka.stream.stage._
 import akka.stream.{ActorMaterializer, Attributes, Outlet, SourceShape}
@@ -64,6 +65,17 @@ import scala.util.{Failure, Success, Try}
 case class KubernetesClientTimeoutConfig(run: FiniteDuration, logs: FiniteDuration)
 
 /**
+ * Configuration for kubernetes cpu resource request/limit scaling based on action memory limit
+ */
+case class KubernetesCpuScalingConfig(millicpus: Int, memory: ByteSize, maxMillicpus: Int)
+
+/**
+ * Exception to indicate a pod took too long to become ready.
+ */
+case class KubernetesPodReadyTimeoutException(timeout: FiniteDuration)
+    extends Exception(s"Pod readiness timed out after ${timeout.toSeconds}s")
+
+/**
  * Configuration for node affinity for the pods that execute user action containers
  * The key,value pair should match the <key,value> pair with which the invoker worker nodes
  * are labeled in the Kubernetes cluster.  The default pair is <openwhisk-role,invoker>,
@@ -77,8 +89,11 @@ case class KubernetesInvokerNodeAffinity(enabled: Boolean, key: String, value: S
 case class KubernetesClientConfig(timeouts: KubernetesClientTimeoutConfig,
                                   userPodNodeAffinity: KubernetesInvokerNodeAffinity,
                                   portForwardingEnabled: Boolean,
-                                  actionNamespace: Option[String] = None,
-                                  podTemplate: Option[ConfigMapValue] = None)
+                                  actionNamespace: Option[String],
+                                  podTemplate: Option[ConfigMapValue],
+                                  cpuScaling: Option[KubernetesCpuScalingConfig],
+                                  pdbEnabled: Boolean,
+                                  fieldRefEnvironment: Option[Map[String, String]])
 
 /**
  * Serves as an interface to the Kubernetes API by proxying its REST API and/or invoking the kubectl CLI.
@@ -95,6 +110,7 @@ class KubernetesClient(
     with ProcessRunner {
   implicit protected val ec = executionContext
   implicit protected val am = ActorMaterializer()
+  implicit protected val scheduler = as.scheduler
   implicit protected val kubeRestClient = {
     val configBuilder = new ConfigBuilder()
       .withConnectionTimeout(config.timeouts.logs.toMillis.toInt)
@@ -103,7 +119,7 @@ class KubernetesClient(
     new DefaultKubernetesClient(configBuilder.build())
   }
 
-  private val podBuilder = new WhiskPodBuilder(kubeRestClient, config.userPodNodeAffinity, config.podTemplate)
+  private val podBuilder = new WhiskPodBuilder(kubeRestClient, config)
 
   def run(name: String,
           image: String,
@@ -111,7 +127,7 @@ class KubernetesClient(
           environment: Map[String, String] = Map.empty,
           labels: Map[String, String] = Map.empty)(implicit transid: TransactionId): Future[KubernetesContainer] = {
 
-    val pod = podBuilder.buildPodSpec(name, image, memory, environment, labels)
+    val (pod, pdb) = podBuilder.buildPodSpec(name, image, memory, environment, labels, config)
     if (transid.meta.extraLogging) {
       log.info(this, s"Pod spec being created\n${Serialization.asYaml(pod)}")
     }
@@ -123,25 +139,25 @@ class KubernetesClient(
       logLevel = akka.event.Logging.InfoLevel)
 
     //create the pod; catch any failure to end the transaction timer
-    try {
-      kubeRestClient.pods.inNamespace(namespace).create(pod)
+    val createdPod = try {
+      val created = kubeRestClient.pods.inNamespace(namespace).create(pod)
+      pdb.map(
+        p =>
+          kubeRestClient.policy.podDisruptionBudget
+            .inNamespace(namespace)
+            .withName(name)
+            .create(p))
+      created
     } catch {
       case e: Throwable =>
         transid.failed(this, start, s"Failed create pod for '$name': ${e.getClass} - ${e.getMessage}", ErrorLevel)
         throw e
     }
     //wait for the pod to become ready; catch any failure to end the transaction timer
-    Future {
-      blocking {
-        val createdPod = kubeRestClient.pods
-          .inNamespace(namespace)
-          .withName(name)
-          .waitUntilReady(config.timeouts.run.length, config.timeouts.run.unit)
-        toContainer(createdPod)
-      }
-    }.map { container =>
+    waitForPod(namespace, createdPod, start.start, config.timeouts.run)
+      .map { readyPod =>
         transid.finished(this, start, logLevel = InfoLevel)
-        container
+        toContainer(readyPod)
       }
       .recoverWith {
         case e =>
@@ -165,48 +181,10 @@ class KubernetesClient(
   }
 
   def rm(container: KubernetesContainer)(implicit transid: TransactionId): Future[Unit] = {
-    val start = transid.started(
-      this,
-      LoggingMarkers.INVOKER_KUBEAPI_CMD("delete"),
-      s"Deleting pod ${container.id}",
-      logLevel = akka.event.Logging.InfoLevel)
-    Future {
-      blocking {
-        kubeRestClient
-          .inNamespace(kubeRestClient.getNamespace)
-          .pods()
-          .withName(container.id.asString)
-          .delete()
-      }
-    }.map(_ => transid.finished(this, start, logLevel = InfoLevel))
-      .recover {
-        case e =>
-          transid.failed(
-            this,
-            start,
-            s"Failed delete pod for '${container.id}': ${e.getClass} - ${e.getMessage}",
-            ErrorLevel)
-      }
+    deleteByName(container.id.asString)
   }
   def rm(podName: String)(implicit transid: TransactionId): Future[Unit] = {
-    val start = transid.started(
-      this,
-      LoggingMarkers.INVOKER_KUBEAPI_CMD("delete"),
-      s"Deleting pod $podName",
-      logLevel = akka.event.Logging.InfoLevel)
-    Future {
-      blocking {
-        kubeRestClient
-          .inNamespace(kubeRestClient.getNamespace)
-          .pods()
-          .withName(podName)
-          .delete()
-      }
-    }.map(_ => transid.finished(this, start, logLevel = InfoLevel))
-      .recover {
-        case e =>
-          transid.failed(this, start, s"Failed delete pod for '$podName': ${e.getClass} - ${e.getMessage}", ErrorLevel)
-      }
+    deleteByName(podName)
   }
 
   def rm(key: String, value: String, ensureUnpaused: Boolean = false)(implicit transid: TransactionId): Future[Unit] = {
@@ -222,6 +200,12 @@ class KubernetesClient(
           .pods()
           .withLabel(key, value)
           .delete()
+        if (config.pdbEnabled) {
+          kubeRestClient.policy.podDisruptionBudget
+            .inNamespace(kubeRestClient.getNamespace)
+            .withLabel(key, value)
+            .delete()
+        }
       }
     }.map(_ => transid.finished(this, start, logLevel = InfoLevel))
       .recover {
@@ -233,7 +217,36 @@ class KubernetesClient(
             ErrorLevel)
       }
   }
-
+  private def deleteByName(podName: String)(implicit transid: TransactionId) = {
+    val start = transid.started(
+      this,
+      LoggingMarkers.INVOKER_KUBEAPI_CMD("delete"),
+      s"Deleting pod ${podName}",
+      logLevel = akka.event.Logging.InfoLevel)
+    Future {
+      blocking {
+        kubeRestClient
+          .inNamespace(kubeRestClient.getNamespace)
+          .pods()
+          .withName(podName)
+          .delete()
+        if (config.pdbEnabled) {
+          kubeRestClient.policy.podDisruptionBudget
+            .inNamespace(kubeRestClient.getNamespace)
+            .withName(podName)
+            .delete()
+        }
+      }
+    }.map(_ => transid.finished(this, start, logLevel = InfoLevel))
+      .recover {
+        case e =>
+          transid.failed(
+            this,
+            start,
+            s"Failed delete pod for '${podName}': ${e.getClass} - ${e.getMessage}",
+            ErrorLevel)
+      }
+  }
   // suspend is a no-op with the basic KubernetesClient
   def suspend(container: KubernetesContainer)(implicit transid: TransactionId): Future[Unit] = Future.successful({})
 
@@ -267,6 +280,29 @@ class KubernetesClient(
     val nativeContainerId = pod.getStatus.getContainerStatuses.get(0).getContainerID.stripPrefix("docker://")
     implicit val kubernetes = this
     new KubernetesContainer(id, addr, workerIP, nativeContainerId, portFwd)
+  }
+  // check for ready status every 1 second until timeout (minus the start time, which is the time for the pod create call) has past
+  private def waitForPod(namespace: String,
+                         pod: Pod,
+                         start: Instant,
+                         timeout: FiniteDuration,
+                         deadlineOpt: Option[Deadline] = None): Future[Pod] = {
+    val readyPod = kubeRestClient
+      .pods()
+      .inNamespace(namespace)
+      .withName(pod.getMetadata.getName)
+    val deadline = deadlineOpt.getOrElse((timeout - (System.currentTimeMillis() - start.toEpochMilli).millis).fromNow)
+    if (!readyPod.isReady) {
+      if (deadline.isOverdue()) {
+        Future.failed(KubernetesPodReadyTimeoutException(timeout))
+      } else {
+        after(1.seconds, scheduler) {
+          waitForPod(namespace, pod, start, timeout, Some(deadline))
+        }
+      }
+    } else {
+      Future.successful(readyPod.get())
+    }
   }
 }
 

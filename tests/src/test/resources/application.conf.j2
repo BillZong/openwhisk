@@ -93,8 +93,22 @@ whisk {
         }
     }
 
+    parameter-storage {
+        key = ""
+    }
+    
     elasticsearch {
         docker-image = "{{ elasticsearch.docker_image | default('docker.elastic.co/elasticsearch/elasticsearch:' ~ elasticsearch.version ) }}"
+    }
+    
+    scheduler {
+        protocol = {{ scheduler.protocol }}
+        https {
+            keystore-flavor = "{{ scheduler.ssl.storeFlavor }}"
+            keystore-path = "{{ openwhisk_home }}/ansible/roles/scheduler/files/{{ scheduler.ssl.keystore.name }}"
+            keystore-password = "{{ scheduler.ssl.keystore.password }}"
+            client-auth = "{{ scheduler.ssl.clientAuth }}"
+        }
     }
 }
 

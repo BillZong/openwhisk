@@ -110,3 +110,17 @@
   - name: generate invoker certificates
     when: invoker.protocol == 'https'
     local_action: shell "{{ playbook_dir }}/files/genssl.sh" "{{ invoker.ssl.cn }}" "server" "{{ playbook_dir }}/roles/invoker/files" {{ invoker.ssl.keystore.password }} {{ invoker.ssl.keyPrefix }} "generateKey"
+
+  # Generate Scheduler certificates
+  - name: ensure Scheduler files directory exists
+    file:
+      path: "{{ playbook_dir }}/roles/scheduler/files/"
+      state: directory
+      mode: 0777
+    become: "{{ logs.dir.become }}"
+    when: scheduler.protocol == 'https'
+
+  - name: generate scheduler certificates
+    when: scheduler.protocol == 'https'
+    local_action: shell "{{ playbook_dir }}/files/genssl.sh" "{{ scheduler.ssl.cn }}" "server" "{{ playbook_dir }}/roles/scheduler/files" {{ scheduler.ssl.keystore.password }} {{ scheduler.ssl.keyPrefix }} "generateKey"
+

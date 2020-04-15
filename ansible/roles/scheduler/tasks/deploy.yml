@@ -1,0 +1,274 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+---
+# This role installs scheduler.
+
+- import_tasks: docker_login.yml
+
+- name: get scheduler name and index
+  set_fact:
+    scheduler_name: "scheduler0"
+    scheduler_index: 0
+
+- name: "pull scheduler image with tag {{docker.image.tag}}"
+  shell: "docker pull {{docker_registry}}{{ docker.image.prefix }}/scheduler:{{docker.image.tag}}"
+  when: docker_registry != ""
+  register: result
+  until: (result.rc == 0)
+  retries: "{{ docker.pull.retries }}"
+  delay: "{{ docker.pull.delay }}"
+
+- name: "determine docker root dir on docker-machine"
+  uri:  url="http://{{ ansible_host }}:{{ docker.port }}/info" return_content=yes
+  register: dockerInfo_output
+  when: environmentInformation.type == 'docker-machine'
+
+- set_fact:
+    dockerInfo: "{{ dockerInfo_output['json'] }}"
+  when: environmentInformation.type == "docker-machine"
+
+- name: "determine docker root dir"
+  shell: echo -e "GET http:/v1.24/info HTTP/1.0\r\n" | nc -U /var/run/docker.sock | grep "{"
+  args:
+    executable: /bin/bash
+  register: dockerInfo_output
+  when: environmentInformation.type != "docker-machine"
+
+- set_fact:
+    dockerInfo: "{{ dockerInfo_output.stdout|from_json }}"
+  when: environmentInformation.type != "docker-machine"
+
+- name: ensure scheduler log directory is created with permissions
+  file:
+    path: "{{ whisk_logs_dir }}/{{ scheduler_name }}"
+    state: directory
+    mode: 0777
+  become: "{{ logs.dir.become }}"
+
+- name: ensure scheduler config directory is created with permissions
+  file:
+    path: "{{ scheduler.confdir }}/{{ scheduler_name }}"
+    state: directory
+    mode: 0777
+  become: "{{ scheduler.dir.become }}"
+
+- name: "copy kafka truststore/keystore"
+  when: kafka.protocol == 'SSL'
+  copy:
+    src: "{{ openwhisk_home }}/ansible/roles/kafka/files/{{ kafka.ssl.keystore.name }}"
+    dest: "{{ scheduler.confdir }}/{{ scheduler_name }}"
+
+- name: copy keystore, key and cert
+  when: scheduler.protocol == "https"
+  copy:
+    src: "{{ inv_item }}"
+    mode: 0666
+    dest: "{{ scheduler.confdir }}/{{ scheduler_name }}"
+  become: "{{ scheduler.dir.become }}"
+  with_items:
+  - "{{ openwhisk_home }}/ansible/roles/scheduler/files/{{ scheduler.ssl.keystore.name }}"
+  - "{{ openwhisk_home }}/ansible/roles/scheduler/files/{{ scheduler.ssl.key }}"
+  - "{{ openwhisk_home }}/ansible/roles/scheduler/files/{{ scheduler.ssl.cert }}"
+  loop_control:
+    loop_var: inv_item
+
+- name: get running scheduler information
+  uri: url="http://{{ ansible_host }}:{{ docker.port }}/containers/json?filters={{ '{"name":[ "scheduler" ],"ancestor":[ "scheduler" ]}' | urlencode }}" return_content=yes
+  register: schedulerInfo_output
+  when: environmentInformation.type == "docker-machine"
+
+- set_fact:
+    schedulerInfo: "{{ schedulerInfo_output['json'] }}"
+  when: environmentInformation.type == "docker-machine"
+
+- name: "get scheduler info"
+  shell: |
+    INFO=`echo -e "GET http:/v1.24/containers/json?filters={{ '{"name":[ "scheduler" ],"ancestor":[ "scheduler" ]}' | urlencode }} HTTP/1.0\r\n" | nc -U /var/run/docker.sock | grep "{"`
+    if [ -z "$INFO" ]; then
+      echo []
+    else
+      echo $INFO
+    fi
+  args:
+    executable: /bin/bash
+  register: schedulerInfo_output
+  when: environmentInformation.type != "docker-machine"
+
+- set_fact:
+    schedulerInfo: "{{ schedulerInfo_output.stdout|from_json }}"
+  when: environmentInformation.type != "docker-machine"
+
+- name: determine if more than one scheduler is running
+  fail:
+    msg: "more than one scheduler is running"
+  when: not scheduler.allowMultipleInstances and schedulerInfo|length > 1
+
+- name: determine if index of scheduler is same with index of inventory host
+  fail:
+    msg: "scheduler index is invalid. expected: /scheduler{{ groups['schedulers'].index(inventory_hostname) }} found: {{ inv_item.Names[0] }}"
+  with_items: "{{ schedulerInfo }}"
+  when: not scheduler.allowMultipleInstances and inv_item.Names[0] != "/{{ scheduler_name }}"
+  loop_control:
+    loop_var: inv_item
+
+- name: copy jmxremote password file
+  when: jmx.enabled
+  template:
+    src: "jmxremote.password.j2"
+    dest: "{{ scheduler.confdir  }}/{{ scheduler_name }}/jmxremote.password"
+    mode: 0777
+
+- name: copy jmxremote access file
+  when: jmx.enabled
+  template:
+    src: "jmxremote.access.j2"
+    dest: "{{ scheduler.confdir  }}/{{ scheduler_name }}/jmxremote.access"
+    mode: 0777
+
+#- name: add additional jvm params if jmxremote is enabled
+#  when: jmx.enabled
+#  set_fact:
+#    scheduler_args: "{{ scheduler.arguments }} {{ scheduler.jmxremote.jvmArgs }}"
+
+- name: prepare scheduler ports
+  set_fact:
+    scheduler_ports_to_expose: ["{{ scheduler.port + (scheduler_index | int) }}:8080"]
+
+- name: expose additional ports if jmxremote is enabled
+  when: jmx.enabled
+  set_fact:
+    scheduler_ports_to_expose: "{{ scheduler_ports_to_expose }} + [ \"{{ jmx.basePortScheduler + (scheduler_index | int) }}:{{ jmx.basePortScheduler + (scheduler_index | int) }}\" ] + [ \"{{ jmx.rmiBasePortScheduler + (scheduler_index | int) }}:{{ jmx.rmiBasePortScheduler + (scheduler_index | int) }}\" ]"
+
+
+- name: Load config from template
+  set_fact:
+    openwhisk_config: "{{ lookup('template', 'config.j2') | b64encode }}"
+
+- name: populate environment variables for scheduler
+  set_fact:
+    env:
+      "JAVA_OPTS": "-Xmx{{ scheduler.heap }} -XX:+CrashOnOutOfMemoryError -XX:+UseGCOverheadLimit -XX:ErrorFile=/logs/java_error.log"
+      "SCHEDULER_OPTS": "{{ scheduler_args | default(scheduler.arguments) }}"
+      "JMX_REMOTE": "{{ jmx.enabled }}"
+      "OPENWHISK_ENCODED_CONFIG": "{{ openwhisk_config }}"
+      "PORT": "8080"
+      "TZ": "{{ docker.timezone }}"
+      "KAFKA_HOSTS": "{{ kafka_connect_string }}"
+      "CONFIG_whisk_kafka_replicationFactor": "{{ kafka.replicationFactor | default() }}"
+      "CONFIG_whisk_kafka_topics_scheduler_retentionBytes": "{{ kafka_topics_scheduler_retentionBytes | default() }}"
+      "CONFIG_whisk_kafka_topics_scheduler_retentionMs": "{{ kafka_topics_scheduler_retentionMS | default() }}"
+      "CONFIG_whisk_kakfa_topics_scheduler_segmentBytes": "{{ kafka_topics_scheduler_segmentBytes | default() }}"
+      "CONFIG_whisk_kafka_common_securityProtocol": "{{ kafka.protocol }}"
+      "CONFIG_whisk_kafka_common_sslTruststoreLocation": "/conf/{{ kafka.ssl.keystore.name }}"
+      "CONFIG_whisk_kafka_common_sslTruststorePassword": "{{ kafka.ssl.keystore.password }}"
+      "CONFIG_whisk_kafka_common_sslKeystoreLocation": "/conf/{{ kafka.ssl.keystore.name }}"
+      "CONFIG_whisk_kafka_common_sslKeystorePassword": "{{ kafka.ssl.keystore.password }}"
+      "CONFIG_whisk_userEvents_enabled": "{{ user_events | default(false) | string }}"
+      "ZOOKEEPER_HOSTS": "{{ zookeeper_connect_string }}"
+      "WHISK_LOGS_DIR": "{{ whisk_logs_dir }}"
+      "METRICS_KAMON": "{{ metrics.kamon.enabled | default(false) | string }}"
+      "METRICS_KAMON_TAGS": "{{ metrics.kamon.tags | default() | string }}"
+      "METRICS_LOG": "{{ metrics.log.enabled | default(false) | string }}"
+      "CONFIG_kamon_statsd_hostname": "{{ metrics.kamon.host }}"
+      "CONFIG_kamon_statsd_port": "{{ metrics.kamon.port }}"
+      "CONFIG_logback_log_level": "{{ scheduler.loglevel }}"
+      "CONFIG_whisk_scheduler_protocol": "{{ scheduler.protocol }}"
+      "CONFIG_whisk_scheduler_https_keystorePath": "/conf/{{ scheduler.ssl.keystore.name }}"
+      "CONFIG_whisk_scheduler_https_keystorePassword": "{{ scheduler.ssl.keystore.password }}"
+      "CONFIG_whisk_scheduler_https_keystoreFlavor": "{{ scheduler.ssl.storeFlavor }}"
+      "CONFIG_whisk_scheduler_https_clientAuth": "{{ scheduler.ssl.clientAuth }}"
+      "CONFIG_whisk_scheduler_invokerNodes_max": "{{ scheduler.nodes.max }}"
+      "CONFIG_whisk_scheduler_invokerNodes_min": "{{ scheduler.nodes.min }}"
+      "CONFIG_whisk_scheduler_resourceDrainThreshold_minPercentage": "{{ scheduler.drain.percentage }}"
+      "CONFIG_whisk_scheduler_resourceDrainThreshold_duration": "{{ scheduler.drain.duration }}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_joiner_bin": "{{ scheduler.nodeHandler.joiner.bin}}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_joiner_cfg": "{{ scheduler.nodeHandler.joiner.cfg}}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_deleter_bin": "{{ scheduler.nodeHandler.deleter.bin}}"
+      "CONFIG_whisk_scheduler_nodeHandlerBinary_deleter_cfg": "{{ scheduler.nodeHandler.deleter.cfg}}"
+
+- name: extend scheduler dns env
+  set_fact:
+    env: "{{ env | default({}) | combine( {'CONFIG_whisk_containerFactory_containerArgs_dnsServers_' ~ inv_item.0: inv_item.1} ) }}"
+  with_indexed_items: "{{ (scheduler_container_network_dns_servers | default()).split(' ')}}"
+  loop_control:
+    loop_var: inv_item
+
+- name: merge extra env variables
+  set_fact:
+    env: "{{ env | combine(scheduler.extraEnv) }}"
+
+- name: populate volumes for scheduler
+  set_fact:
+    scheduler_volumes:
+      - "{{ whisk_logs_dir }}/{{ scheduler_name }}:/logs"
+      - "{{ scheduler.confdir }}/{{ scheduler_name }}:/conf"
+
+- name: check if coverage collection is enabled
+  set_fact:
+    coverage_enabled: false
+  when: coverage_enabled is undefined
+
+- name: ensure scheduler coverage directory is created with permissions
+  file:
+    path: "{{ coverage_logs_dir }}/scheduler/{{ item }}"
+    state: directory
+    mode: 0777
+  with_items:
+    - scheduler
+    - common
+  become: "{{ logs.dir.become }}"
+  when: coverage_enabled
+
+- name: extend scheduler volume for coverage
+  set_fact:
+    scheduler_volumes: "{{ scheduler_volumes|default('') }},{{ coverage_logs_dir }}/scheduler:/coverage"
+  when: coverage_enabled
+
+- name: include plugins
+  include_tasks: "{{ item }}.yml"
+  with_items: "{{ scheduler_plugins | default([]) }}"
+
+- name: start scheduler
+  docker_container:
+    userns_mode: "host"
+    pid_mode: "host"
+    privileged: "yes"
+    name: "{{ scheduler_name }}"
+    hostname: "{{ scheduler_name }}"
+    restart_policy: "{{ docker.restart.policy }}"
+    image: "{{ docker_registry }}{{ docker.image.prefix }}/scheduler:{{ 'cov' if (coverage_enabled) else docker.image.tag }}"
+    state: started
+    recreate: true
+    env: "{{ env }}"
+    volumes: "{{ scheduler_volumes }}"
+    ports: "{{ scheduler_ports_to_expose }}"
+    command:
+      /bin/sh -c
+      "exec /init.sh {{ scheduler_index }}
+      >> /logs/{{ scheduler_name }}_logs.log 2>&1"
+
+
+- name: wait until Scheduler is up and running
+  uri:
+    url: "{{ scheduler.protocol }}://{{ ansible_host }}:{{ scheduler.port + (scheduler_index | int) }}/ping"
+    validate_certs: "no"
+    client_key: "{{ scheduler.confdir }}/{{ scheduler_name }}/{{ scheduler.ssl.key }}"
+    client_cert: "{{ scheduler.confdir }}/{{ scheduler_name }}/{{ scheduler.ssl.cert }}"
+  register: result
+  until: result.status == 200
+  retries: 12
+  delay: 5

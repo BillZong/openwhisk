@@ -39,10 +39,11 @@ import pureconfig.generic.auto._
 
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
-import scala.concurrent.{Await, ExecutionContext}
+import scala.concurrent.{Await, ExecutionContext, Future}
 import scala.io.AnsiColor
 import scala.util.{Failure, Success, Try}
 import KafkaLauncher._
+import SchedulerLauncher._
 
 class Conf(arguments: Seq[String]) extends ScallopConf(Conf.expandAllMode(arguments)) {
   import StandaloneOpenWhisk.preferredPgPort
@@ -69,6 +70,13 @@ class Conf(arguments: Seq[String]) extends ScallopConf(Conf.expandAllMode(argume
 
   val kafka = opt[Boolean](descr = "Enable embedded Kafka support", noshort = true)
   val kafkaUi = opt[Boolean](descr = "Enable Kafka UI", noshort = true)
+
+  val scheduler = opt[Boolean](descr = "Enable resource scheduler support", noshort = true)
+  val schedulerPort = opt[Int](
+    descr =
+      s"Scheduler port. If not specified then $preferredSchedulerPort or some random free port (if $preferredSchedulerPort is busy) would be used",
+    noshort = true,
+    required = false)
 
   //The port option below express following usage. Note that "preferred"" port values are not configured as default
   // on purpose
@@ -135,7 +143,7 @@ class Conf(arguments: Seq[String]) extends ScallopConf(Conf.expandAllMode(argume
 object Conf {
   def expandAllMode(args: Seq[String]): Seq[String] = {
     if (args.contains("--all")) {
-      val svcs = Seq("api-gw", "couchdb", "user-events", "kafka", "kafka-ui")
+      val svcs = Seq("api-gw", "couchdb", "user-events", "kafka", "kafka-ui", "scheduler")
       val buf = args.toBuffer
       svcs.foreach { s =>
         val arg = "--" + s
@@ -158,6 +166,7 @@ object StandaloneConfigKeys {
   val apiGwConfigKey = "whisk.standalone.api-gateway"
   val couchDBConfigKey = "whisk.standalone.couchdb"
   val userEventConfigKey = "whisk.standalone.user-events"
+  val schedulerConfigKey = "whisk.standalone.scheduler"
 }
 
 object StandaloneOpenWhisk extends SLF4JLogging {
@@ -262,6 +271,10 @@ object StandaloneOpenWhisk extends SLF4JLogging {
       }
       pgLauncher.foreach(_.install())
     }
+
+    if (conf.scheduler())
+      Some(startScheduler(dockerClient, conf, s"localhost:$kafkaDockerPort"))
+    else None
   }
 
   def initialize(conf: Conf): Unit = {
@@ -477,6 +490,27 @@ object StandaloneOpenWhisk extends SLF4JLogging {
   private def getUsers(): Map[String, String] = {
     val m = loadConfigOrThrow[Map[String, String]](StandaloneConfigKeys.usersConfigKey)
     m.map { case (name, key) => (name.replace('-', '.'), key) }
+  }
+
+  private def startScheduler(dockerClient: StandaloneDockerClient, conf: Conf, kafkaHosts: String)(
+    implicit logging: Logging,
+    as: ActorSystem,
+    ec: ExecutionContext,
+    materializer: ActorMaterializer): ServiceContainer = {
+    implicit val tid: TransactionId = TransactionId(systemPrefix + "scheduler")
+    val schedulerPort = getPort(conf.schedulerPort.toOption, preferredSchedulerPort)
+    val k = new SchedulerLauncher(dockerClient, schedulerPort)
+
+    val f = k.runScheduler(kafkaHosts)
+    val g = f.andThen {
+      case Success(_) =>
+        logging.info(
+          this,
+          s"Scheduler started successfully at http://${StandaloneDockerSupport.getLocalHostName()}:$schedulerPort")
+      case Failure(t) =>
+        logging.error(this, s"Error starting scheduler + $t")
+    }
+    Await.result(g, 20.seconds)
   }
 
   private def startCouchDb(dataDir: File, dockerClient: StandaloneDockerClient)(
