@@ -18,6 +18,10 @@
 package org.apache.openwhisk.core.entity
 
 import spray.json.DefaultJsonProtocol
+import org.apache.openwhisk.core.entity.ControllerInstanceId.LEGAL_CHARS
+import org.apache.openwhisk.core.entity.ControllerInstanceId.MAX_NAME_LENGTH
+import org.apache.openwhisk.core.entity.SchedulerInstanceId.LEGAL_SCHEDULER_CHARS
+import org.apache.openwhisk.core.entity.SchedulerInstanceId.MAX_SCHEDULER_NAME_LENGTH
 
 /**
  * An instance id representing an invoker
@@ -76,4 +80,20 @@ trait InstanceId {
 
   val source: String
 
+}
+
+case class SchedulerInstanceId(val asString: String) {
+  require(
+    asString.length <= MAX_SCHEDULER_NAME_LENGTH && asString.matches(LEGAL_SCHEDULER_CHARS),
+    "Scheduler instance id contains invalid characters")
+}
+
+object SchedulerInstanceId extends DefaultJsonProtocol {
+  // scheduler ids become part of a kafka topic, hence, hence allow only certain characters
+  private val LEGAL_SCHEDULER_CHARS = "[a-zA-Z0-9._-]+"
+
+  // reserve some number of characters as the prefix to be added to topic names
+  private val MAX_SCHEDULER_NAME_LENGTH = 249 - 121
+
+  implicit val serdes = jsonFormat1(SchedulerInstanceId.apply)
 }
