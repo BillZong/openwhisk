@@ -269,5 +269,4 @@ object ConfigKeys {
   val apacheClientConfig = "whisk.apache-client"
 
   val parameterStorage = "whisk.parameter-storage"
-  val schedulerInvokerNodeLimits = "whisk.scheduler.invoker-nodes"
 }
