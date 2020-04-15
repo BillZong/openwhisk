@@ -156,7 +156,6 @@ dependencies {
     compile project(':core:controller')
     compile project(':tools:admin')
     compile "org.rogach:scallop_${gradle.scala.depVersion}:3.3.2"
-    compile project(':core:scheduler')
 
     compile "io.github.embeddedkafka:embedded-kafka_${gradle.scala.depVersion}:2.4.0"
     compile "org.scala-lang:scala-reflect:${gradle.scala.version}"
@@ -175,3 +174,5 @@ gradle.projectsEvaluated {
         }
     }
 }
+
+build.dependsOn ':core:scheduler:distDocker'

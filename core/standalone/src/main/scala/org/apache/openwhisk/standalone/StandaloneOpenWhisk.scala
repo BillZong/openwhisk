@@ -31,7 +31,6 @@ import org.apache.openwhisk.common.{AkkaLogging, Config, Logging, TransactionId}
 import org.apache.openwhisk.core.cli.WhiskAdmin
 import org.apache.openwhisk.core.controller.Controller
 import org.apache.openwhisk.core.{ConfigKeys, WhiskConfig}
-import org.apache.openwhisk.core.scheduler.Scheduler
 import org.apache.openwhisk.standalone.ColorOutput.clr
 import org.apache.openwhisk.standalone.StandaloneDockerSupport.checkOrAllocatePort
 import org.rogach.scallop.ScallopConf
